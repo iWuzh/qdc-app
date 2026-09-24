@@ -78,8 +78,12 @@ async function sincronizar() {
       try { r = await llamar(Object.assign({ accion: "registrar" }, reg)); }
       catch (e) { S.enLinea = false; break; }          // sin señal: se reintenta después
       S.enLinea = true;
-      if (r.pinInvalido) { S.errores.push({ reg, error: r.error }); }
-      else if (!r.ok) { S.errores.push({ reg, error: r.error || "El servidor no lo aceptó." }); }
+      // PIN vencido (lo cambiaron en el servidor): el registro SE QUEDA en la
+      // cola y se pide el PIN otra vez. Nunca se bota una venta por esto.
+      if (r.pinInvalido) { S.sesion.pinVencido = true; guardar("sesion", S.sesion); S.vista = {}; break; }
+      // Bloqueo por intentos: se queda en la cola y se reintenta más tarde.
+      if (r.bloqueado) break;
+      if (!r.ok) { S.errores.push({ reg, error: r.error || "El servidor no lo aceptó." }); }
       S.cola.shift(); guardar("cola", S.cola); guardar("errores", S.errores);
     }
     if (!S.cola.length && S.enLinea) await refrescar();
@@ -127,7 +131,7 @@ const actualizadoTxt = () => S.actualizado ? "Datos de las " + new Date(S.actual
 function pintar() {
   $("#tabs").hidden = !S.sesion;
   $$("#tabs button").forEach(b => b.dataset.tab === S.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
-  if (!S.sesion) return login();
+  if (!S.sesion || S.sesion.pinVencido) { $("#tabs").hidden = true; return login(); }
   ({ inicio, pedido, ruta, cuentas })[S.tab]();
 }
 
@@ -137,6 +141,7 @@ function login() {
   const v = S.vista; v.pin = v.pin || "";
   $("#screen").innerHTML = `
     <img class="logo" src="icon-192.png" alt="">
+    ${S.sesion && S.sesion.pinVencido ? `<div class="banner">Tu PIN ya no es válido (¿lo cambiaron?). Escríbelo de nuevo.${S.cola.length ? ` Hay <b>${S.cola.length}</b> registro${S.cola.length > 1 ? "s" : ""} esperando: se mandan solos al entrar.` : ""}</div>` : ""}
     <div class="hint" style="text-align:center">Escribe tu PIN</div>
     <div class="pindots">${[0,1,2,3].map(i => `<span class="${i < v.pin.length ? "on" : ""}"></span>`).join("")}</div>
     ${v.error ? `<div class="hint bad" style="text-align:center">${esc(v.error)}</div>` : ""}
@@ -239,10 +244,16 @@ function pintarErrores() {
   const box = document.createElement("div");
   box.className = "panel";
   box.innerHTML = `<div class="k" style="font-weight:700">No se guardaron (revísalos y vuelve a registrarlos):</div>` +
-    S.errores.map((e, i) => `<div class="card"><div>${esc(describir(e.reg))}</div><div class="hint bad">${esc(e.error)}</div></div>`).join("") +
-    `<button class="go alt" id="borrarErr">Entendido, borrar esta lista</button>`;
+    S.errores.map((e, i) => `<div class="card"><div>${esc(describir(e.reg))}</div><div class="hint bad">${esc(e.error)}</div>
+      <div class="btns"><button class="go" data-reint="${i}">Reintentar</button><button class="go alt" data-desc="${i}">Descartar</button></div></div>`).join("");
   $("#screen").prepend(box);
-  $("#borrarErr").onclick = () => { S.errores = []; guardar("errores", []); ir("inicio"); };
+  const quitar = i => { const e = S.errores.splice(i, 1)[0]; guardar("errores", S.errores); return e; };
+  $$("[data-reint]").forEach(b => b.onclick = () => {
+    const e = quitar(+b.dataset.reint);
+    S.cola.push(e.reg); guardar("cola", S.cola);   // mismo id: si ya hubiera entrado, el servidor no lo duplica
+    toast("Reintentando…"); ir("inicio", S.errores.length ? { errores: true } : {}); sincronizar();
+  });
+  $$("[data-desc]").forEach(b => b.onclick = () => { quitar(+b.dataset.desc); ir("inicio", S.errores.length ? { errores: true } : {}); });
 }
 function describir(r) {
   if (r.tipo === "cobro") return `Cobro de ${r.cliente} · ${fmt(r.monto)}`;
