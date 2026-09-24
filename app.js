@@ -137,7 +137,11 @@ function pintar() {
 }
 
 // ---------- Login ----------
+// Google "duerme" el servidor cuando no se usa y despertarlo tarda 5-25 s. Se
+// despierta apenas aparece la pantalla del PIN, mientras la persona escribe.
+let despertado = false;
 function login() {
+  if (!despertado) { despertado = true; fetch(API).catch(() => {}); }
   header("Quesos Don Carlos", window.QDC_CONFIG.AMBIENTE === "prueba" ? "Ambiente de PRUEBA" : "", false);
   const v = S.vista; v.pin = v.pin || "";
   $("#screen").innerHTML = `
