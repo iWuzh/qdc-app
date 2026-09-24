@@ -88,20 +88,21 @@ async function sincronizar() {
     }
     if (!S.cola.length && S.enLinea) await refrescar();
   } finally {
-    S.enviando = false; pintarSync(); pintar();
+    S.enviando = false; pintarSync(); repintar();
   }
 }
 
+const repintar = () => { const a = document.activeElement; if (!a || a.tagName !== "INPUT") pintar(); };
 async function refrescar() {
   try {
-    const [cu, ru] = await Promise.all([llamar({ accion: "cuentas" }), llamar({ accion: "ruta" })]);
-    if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); }
-    if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); }
+    // Las tres consultas a la vez; cada una pinta apenas llega.
     const hoy = hoyIso();
-    if (!S.catalogo || leer("catalogoDia", "") !== hoy) {
-      const ca = await llamar({ accion: "catalogo" });
-      if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); }
-    }
+    const pedirCatalogo = !S.catalogo || leer("catalogoDia", "") !== hoy;
+    await Promise.all([
+      pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); repintar(); } }),
+      llamar({ accion: "ruta" }).then(ru => { if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); repintar(); } }),
+      llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); repintar(); } })
+    ]);
     S.actualizado = new Date().toISOString(); guardar("actualizado", S.actualizado);
     S.enLinea = true;
   } catch (e) { S.enLinea = false; }
@@ -162,7 +163,7 @@ function login() {
         v.verificando = false;
         if (!r.ok) { v.error = r.error; v.pin = ""; return login(); }
         S.sesion = { pin, nombre: r.nombre }; guardar("sesion", S.sesion);
-        S.catalogo = r.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoyIso());
+        // Entra de una: catálogo, cuentas y ruta se bajan detrás (sincronizar).
         S.enLinea = true; ir("inicio"); pintarSync(); sincronizar();
       } catch (e) { v.verificando = false; v.error = "Sin señal. Para entrar la primera vez hace falta internet."; v.pin = ""; login(); }
       return;
@@ -279,7 +280,7 @@ const descLinea = l => [l.producto, l.presentacion, l.sabor].filter(Boolean).joi
 
 // ---------- Pedido ----------
 function pedido() {
-  if (!S.catalogo) { header("Nuevo pedido", "", true); $("#screen").innerHTML = `<div class="hint">Hace falta señal una vez para bajar la lista de productos.</div>`; return; }
+  if (!S.catalogo) { header("Nuevo pedido", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
   const v = S.vista; v.lineas = v.lineas || []; v.pick = v.pick || {};
   header("Nuevo pedido", "Guárdalo para la ruta, o entrégalo ya", true);
   const clientes = S.catalogo.clientes;
@@ -373,7 +374,7 @@ function cablearLineas(lineas, redibujar, quitarEnCero) {
 // ---------- Entregas (ruta del domingo) ----------
 function ruta() {
   const v = S.vista;
-  if (!S.ruta) { header("Ruta de entrega", "", true); $("#screen").innerHTML = `<div class="hint">Hace falta señal una vez para bajar la ruta.</div>`; return; }
+  if (!S.ruta) { header("Ruta de entrega", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando ruta…" : "Hace falta señal una vez para bajar la ruta."}</div>`; return; }
   if (v.cliente) return entrega();
   const cl = S.ruta.clientes, hechos = cl.filter(c => c.entregado).length;
   header("Ruta de entrega", S.ruta.etiqueta, true);
@@ -444,7 +445,7 @@ const cantTxt = it => (Number.isInteger(it.q) ? it.q : Number(it.q).toFixed(2).r
 
 function cuentas() {
   const v = S.vista; v.lado = v.lado || "cobrar";
-  if (!S.cuentas) { header("Cuentas", "", true); $("#screen").innerHTML = `<div class="hint">Hace falta señal una vez para bajar las cuentas.</div>`; return; }
+  if (!S.cuentas) { header("Cuentas", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando cuentas…" : "Hace falta señal una vez para bajar las cuentas."}</div>`; return; }
   if (v.quien) return ({ deuda: ctaDeuda, hist: ctaHist, det: ctaDet })[v.nivel || "deuda"]();
   const cobrar = v.lado === "cobrar";
   const filas = cobrar ? S.cuentas.cobrar.map(c => ({ n: c.cliente, c })) : S.cuentas.pagar.map(p => ({ n: p.proveedor, c: p }));
