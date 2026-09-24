@@ -142,23 +142,29 @@ function login() {
   $("#screen").innerHTML = `
     <img class="logo" src="icon-192.png" alt="">
     ${S.sesion && S.sesion.pinVencido ? `<div class="banner">Tu PIN ya no es válido (¿lo cambiaron?). Escríbelo de nuevo.${S.cola.length ? ` Hay <b>${S.cola.length}</b> registro${S.cola.length > 1 ? "s" : ""} esperando: se mandan solos al entrar.` : ""}</div>` : ""}
-    <div class="hint" style="text-align:center">Escribe tu PIN</div>
+    <div class="hint" style="text-align:center">${v.verificando ? "Verificando…" : "Escribe tu PIN"}</div>
     <div class="pindots">${[0,1,2,3].map(i => `<span class="${i < v.pin.length ? "on" : ""}"></span>`).join("")}</div>
     ${v.error ? `<div class="hint bad" style="text-align:center">${esc(v.error)}</div>` : ""}
-    <div class="pinpad">${[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map(k => k === "" ? "<span></span>" : `<button data-k="${k}">${k}</button>`).join("")}</div>`;
+    <div class="pinpad" style="${v.verificando ? "opacity:.4" : ""}">${[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map(k => k === "" ? "<span></span>" : `<button data-k="${k}" ${v.verificando ? "disabled" : ""}>${k}</button>`).join("")}</div>`;
   $$("[data-k]").forEach(b => b.onclick = async () => {
+    // Mientras se verifica, el teclado no hace nada: antes se podía seguir
+    // borrando y se guardaba el PIN a medio borrar (24 sep, "PIN incorrecto"
+    // en la primera venta de Marcos).
+    if (v.verificando) return;
     const k = b.dataset.k;
     if (k === "⌫") v.pin = v.pin.slice(0, -1); else if (v.pin.length < 8) v.pin += k;
     v.error = "";
     if (v.pin.length === 4) {
-      login();
+      const pin = v.pin;                 // el PIN que se manda es el que se guarda
+      v.verificando = true; login();
       try {
-        const r = await fetch(API, { method: "POST", body: JSON.stringify({ accion: "login", pin: v.pin }) }).then(x => x.json());
+        const r = await fetch(API, { method: "POST", body: JSON.stringify({ accion: "login", pin }) }).then(x => x.json());
+        v.verificando = false;
         if (!r.ok) { v.error = r.error; v.pin = ""; return login(); }
-        S.sesion = { pin: v.pin, nombre: r.nombre }; guardar("sesion", S.sesion);
+        S.sesion = { pin, nombre: r.nombre }; guardar("sesion", S.sesion);
         S.catalogo = r.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoyIso());
         S.enLinea = true; ir("inicio"); pintarSync(); sincronizar();
-      } catch (e) { v.error = "Sin señal. Para entrar la primera vez hace falta internet."; v.pin = ""; login(); }
+      } catch (e) { v.verificando = false; v.error = "Sin señal. Para entrar la primera vez hace falta internet."; v.pin = ""; login(); }
       return;
     }
     login();
