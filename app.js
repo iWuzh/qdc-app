@@ -274,30 +274,102 @@ function describir(r) {
 }
 
 // ---------- Catálogo ----------
-const prodCat = n => (S.catalogo.productos || []).find(p => p.nombre === n);
+const prodCat = n => (S.catalogo.productos || []).find(p => norm(p.nombre) === norm(n));
 function precioDe(producto, presentacion, dist) {
   const p = prodCat(producto); if (!p) return 0;
-  const pr = presentacion ? (p.presentaciones.find(x => x.nombre === presentacion) || {}) : p;
+  const pr = presentacion ? (p.presentaciones.find(x => norm(x.nombre) === norm(presentacion)) || {}) : p;
   return (dist ? pr.distribucion : pr.contado) || 0;
 }
 const descLinea = l => [l.producto, l.presentacion, l.sabor].filter(Boolean).join(" · ");
 
+// ---------- Selector de productos (Pedido y Entregas) ----------
+// Cada combinación producto + presentación + sabor tiene su propio ➖/➕. El
+// yogur: se elige la presentación y debajo salen TODOS los sabores, cada uno
+// con su cantidad (varios sabores en el mismo pedido sin repetir pasos).
+// En Entregas se ve lo que pidió el cliente y se puede agregar lo que no pidió.
+const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+const mismaLinea = (l, p, pr, s) => norm(l.producto) === norm(p) && norm(l.presentacion) === norm(pr) && norm(l.sabor) === norm(s);
+const idDe = k => "q" + Array.from(k).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36);
+
+function totalLineas(lineas, dist) {
+  let total = 0, faltaPeso = false;
+  for (const l of lineas) {
+    const q = num(l.cantidad); if (!q) continue;
+    const p = prodCat(l.producto);
+    if (p && p.porLibra) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist); else faltaPeso = true; }
+    else total += q * precioDe(l.producto, l.presentacion, dist);
+  }
+  return { total, faltaPeso, hay: lineas.some(l => num(l.cantidad) > 0) };
+}
+
+function selector(v, dist, esEntrega) {
+  v.abierto = v.abierto || {};
+  const filas = [];   // para cablear después
+  const fila = (p, pr, s, etiqueta) => {
+    const l = v.lineas.find(x => mismaLinea(x, p.nombre, pr, s));
+    const q = l ? l.cantidad : "";
+    const k = [p.nombre, pr, s].join("|");
+    const id = idDe(k);
+    filas.push({ k, p: p.nombre, pr, s, id });
+    const precio = precioDe(p.nombre, pr, dist);
+    const falta = p.porLibra && num(q) > 0 && !(num(l && l.libras) > 0);
+    return `<div class="ln" style="${num(q) > 0 ? "" : "opacity:.85"}">
+      <div><div class="d">${esc(etiqueta)}</div><div class="x">${precio ? fmt(precio) + (p.porLibra ? "/lb" : " c/u") : ""}${esEntrega && l && l.pedido ? ` · pidió ${l.pedido}` : ""}</div></div>
+      <div class="ctl">
+        <div class="step"><button data-menos="${esc(k)}" aria-label="Menos">−</button><input class="qty" id="${id}" inputmode="decimal" placeholder="0" value="${esc(num(q) ? q : "")}" data-cant="${esc(k)}" aria-label="Cantidad"><button data-mas="${esc(k)}" aria-label="Más">+</button></div>
+        ${p.porLibra && num(q) > 0 ? `<label class="lb"><input id="${id}lb" class="${falta ? "need" : ""}" inputmode="decimal" placeholder="0.0" value="${esc(l.libras)}" data-lbs="${esc(k)}" aria-label="Libras"><span>lb</span></label>` : ""}
+      </div></div>`;
+  };
+  const html = S.catalogo.productos.map(p => {
+    const mias = v.lineas.filter(l => norm(l.producto) === norm(p.nombre) && num(l.cantidad) > 0);
+    const cuantos = mias.reduce((a, l) => a + num(l.cantidad), 0);
+    let cuerpo = "";
+    if (p.sabores && p.presentaciones.length) {
+      const conCant = pr => v.lineas.filter(l => norm(l.producto) === norm(p.nombre) && norm(l.presentacion) === norm(pr) && num(l.cantidad) > 0).reduce((a, l) => a + num(l.cantidad), 0);
+      const abierta = v.abierto[p.nombre] || (p.presentaciones.find(x => conCant(x.nombre)) || p.presentaciones[0]).nombre;
+      cuerpo = `<div class="chips">${p.presentaciones.map(x => { const c = conCant(x.nombre); return `<button class="chip sm" data-abrir="${esc(p.nombre)}|${esc(x.nombre)}" aria-pressed="${norm(abierta) === norm(x.nombre)}">${esc(x.nombre)}${c ? " · " + c : ""}</button>`; }).join("")}</div>
+        <div class="lines">${S.catalogo.sabores.map(s => fila(p, abierta, s, s)).join("")}</div>`;
+    } else if (p.presentaciones.length) {
+      cuerpo = `<div class="lines">${p.presentaciones.map(x => fila(p, x.nombre, "", x.nombre)).join("")}</div>`;
+    } else {
+      cuerpo = `<div class="lines">${fila(p, "", "", "Cantidad")}</div>`;
+    }
+    return `<div class="prod ${cuantos ? "on" : ""}">
+      <div class="ph"><div><div class="n">${esc(p.nombre)}</div><div class="p">${cuantos ? "Llevas " + cuantos + (p.porLibra ? " (el precio sale de las libras)" : "") : p.porLibra ? "Por libra" : ""}</div></div></div>
+      ${cuerpo}</div>`;
+  }).join("");
+  // Lo que pidió el cliente pero ya no está en el catálogo (raro): se muestra igual.
+  const huerfanas = v.lineas.filter(l => !prodCat(l.producto) && !S.catalogo.productos.some(p => norm(p.nombre) === norm(l.producto)));
+  const extra = huerfanas.length ? `<div class="prod on"><div class="n">Otros</div><div class="lines">${huerfanas.map(l => fila({ nombre: l.producto, porLibra: false }, l.presentacion || "", l.sabor || "", descLinea(l))).join("")}</div></div>` : "";
+  return { html: `<div class="prods">${html}${extra}</div>`, filas };
+}
+
+function cablearSelector(v, filas, redibujar, esEntrega) {
+  const buscar = k => filas.find(f => f.k === k);
+  const linea = (f, crear) => {
+    let l = v.lineas.find(x => mismaLinea(x, f.p, f.pr, f.s));
+    if (!l && crear) { l = { producto: f.p, presentacion: f.pr, sabor: f.s, cantidad: 0, libras: "" }; v.lineas.push(l); }
+    return l;
+  };
+  const limpiar = l => { if (l && !num(l.cantidad) && !(esEntrega && l.pedido)) v.lineas.splice(v.lineas.indexOf(l), 1); };
+  $$("[data-mas]").forEach(b => b.onclick = () => { const l = linea(buscar(b.dataset.mas), true); l.cantidad = num(l.cantidad) + 1; redibujar(); });
+  $$("[data-menos]").forEach(b => b.onclick = () => { const l = linea(buscar(b.dataset.menos), false); if (!l) return; l.cantidad = Math.max(0, num(l.cantidad) - 1); limpiar(l); redibujar(); });
+  $$("[data-cant]").forEach(inp => inp.oninput = () => { const l = linea(buscar(inp.dataset.cant), true); l.cantidad = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
+  $$("[data-cant]").forEach(inp => inp.onblur = () => { const l = linea(buscar(inp.dataset.cant), false); if (l && !num(l.cantidad)) { limpiar(l); redibujar(); } });
+  $$("[data-lbs]").forEach(inp => inp.oninput = () => { const l = linea(buscar(inp.dataset.lbs), true); l.libras = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
+  $$("[data-abrir]").forEach(b => b.onclick = () => { const [p, pr] = b.dataset.abrir.split("|"); v.abierto[p] = pr; redibujar(); });
+}
+
 // ---------- Pedido ----------
 function pedido() {
   if (!S.catalogo) { header("Nuevo pedido", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
-  const v = S.vista; v.lineas = v.lineas || []; v.pick = v.pick || {};
+  const v = S.vista; v.lineas = v.lineas || [];
   header("Nuevo pedido", "Guárdalo para la ruta, o entrégalo ya", true);
   const clientes = S.catalogo.clientes;
   const dist = !v.otro && !!v.cliente;
-  let total = 0, faltaPeso = false, sinPeso = false;
-  for (const l of v.lineas) {
-    const q = num(l.cantidad); if (!q) continue;
-    const p = prodCat(l.producto);
-    if (p && p.porLibra) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist); else { faltaPeso = true; sinPeso = true; } }
-    else total += q * precioDe(l.producto, l.presentacion, dist);
-  }
-  const hay = v.lineas.some(l => num(l.cantidad) > 0);
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist);
   const quien = v.otro ? ((v.ref || "").trim() || "Contado") : v.cliente;
+  const sel = selector(v, dist, false);
   $("#screen").innerHTML = `
     <div class="label">Cliente</div>
     <div class="chips">
@@ -307,23 +379,8 @@ function pedido() {
     ${v.otro ? `<div class="field"><label for="ref">Nombre o referencia (opcional)</label><input class="txt" id="ref" placeholder="Ej: señora del colmado" value="${esc(v.ref)}"></div>` : ""}
     ${quien ? `<div>${dist ? `<span class="tag dist">Distribución</span> <span class="hint">está en la lista de clientes</span>` : `<span class="tag cont">Contado</span> <span class="hint">no está en la lista de clientes</span>`}</div>` : ""}
     <div class="label">Productos</div>
-    <div class="prods">
-      ${S.catalogo.productos.map(p => {
-        const mias = v.lineas.map((l, i) => [l, i]).filter(([l]) => l.producto === p.nombre);
-        const pk = v.pick[p.nombre] || {};
-        const opc = p.presentaciones.length || p.sabores;
-        const listo = (!p.presentaciones.length || pk.presentacion) && (!p.sabores || pk.sabor);
-        return `<div class="prod ${mias.length ? "on" : ""}">
-          <div class="ph"><div><div class="n">${esc(p.nombre)}</div><div class="p">${p.porLibra ? "Por libra" : p.presentaciones.length ? "Según presentación" : fmt(dist ? p.distribucion : p.contado) + " c/u"}</div></div>
-            ${!opc && !mias.length ? `<button class="add" data-add="${esc(p.nombre)}">+ Agregar</button>` : ""}</div>
-          ${p.presentaciones.length ? `<div class="opt"><div class="k">Presentación</div><div class="chips">${p.presentaciones.map(x => `<button class="chip sm" data-pv="${esc(p.nombre)}|${esc(x.nombre)}" aria-pressed="${pk.presentacion === x.nombre}">${esc(x.nombre)}</button>`).join("")}</div></div>` : ""}
-          ${p.sabores ? `<div class="opt"><div class="k">Sabor</div><div class="chips">${S.catalogo.sabores.map(s => `<button class="chip sm" data-ps="${esc(p.nombre)}|${esc(s)}" aria-pressed="${pk.sabor === s}">${esc(s)}</button>`).join("")}</div></div>` : ""}
-          ${opc ? `<button class="add" data-add="${esc(p.nombre)}" ${listo ? "" : "disabled"}>${listo ? "+ Agregar " + esc([pk.presentacion, pk.sabor].filter(Boolean).join(" · ")) : (p.presentaciones.length && p.sabores ? "Elige presentación y sabor" : p.sabores ? "Elige el sabor" : "Elige presentación")}</button>` : ""}
-          ${mias.map(([l, i]) => lineaHTML(l, i, p, dist)).join("")}
-        </div>`;
-      }).join("")}
-    </div>
-    ${sinPeso ? `<div class="hint">⚖️ Los quesos por libra sin peso no entran en el total. Para <b>Entregar pedido</b> hace falta el peso.</div>` : ""}
+    ${sel.html}
+    ${faltaPeso ? `<div class="hint">⚖️ Los quesos por libra sin peso no entran en el total. Para <b>Entregar pedido</b> hace falta el peso.</div>` : ""}
     <div class="hint">El total es una guía: el precio final lo pone el servidor (incluye precios especiales por cliente).</div>
     <div class="confirm">
       <div class="tot"><span class="k">Total estimado</span><span class="v">${fmt(total)}</span></div>
@@ -335,15 +392,7 @@ function pedido() {
   $$("[data-c]").forEach(b => b.onclick = () => { v.cliente = b.dataset.c; v.otro = false; pedido(); });
   $("#otro").onclick = () => { v.otro = true; v.cliente = null; pedido(); setTimeout(() => $("#ref") && $("#ref").focus(), 0); };
   const ref = $("#ref"); if (ref) ref.oninput = e => { v.ref = e.target.value; conFoco(pedido); };
-  $$("[data-pv]").forEach(b => b.onclick = () => { const [n, x] = b.dataset.pv.split("|"); v.pick[n] = Object.assign({}, v.pick[n], { presentacion: x }); pedido(); });
-  $$("[data-ps]").forEach(b => b.onclick = () => { const [n, x] = b.dataset.ps.split("|"); v.pick[n] = Object.assign({}, v.pick[n], { sabor: x }); pedido(); });
-  $$("[data-add]").forEach(b => b.onclick = () => {
-    const n = b.dataset.add, pk = v.pick[n] || {};
-    const ex = v.lineas.find(l => l.producto === n && l.presentacion === pk.presentacion && l.sabor === pk.sabor);
-    if (ex) ex.cantidad = num(ex.cantidad) + 1; else v.lineas.push({ producto: n, presentacion: pk.presentacion, sabor: pk.sabor, cantidad: 1, libras: "" });
-    v.pick[n] = {}; pedido();
-  });
-  cablearLineas(v.lineas, pedido, true);
+  cablearSelector(v, sel.filas, pedido, false);
   const fin = tipo => {
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const it = { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: num(l.cantidad) };
@@ -356,23 +405,6 @@ function pedido() {
   };
   $("#guardar").onclick = () => fin("pedido");
   $("#entregar").onclick = () => fin("venta");
-}
-
-function lineaHTML(l, i, p, dist) {
-  const lb = p && p.porLibra, falta = lb && !(num(l.libras) > 0);
-  return `<div class="ln">
-    <div><div class="d">${esc([l.presentacion, l.sabor].filter(Boolean).join(" · ") || l.producto)}</div><div class="x">${lb ? fmt(precioDe(l.producto, l.presentacion, dist)) + "/lb" : fmt(precioDe(l.producto, l.presentacion, dist)) + " c/u"}</div></div>
-    <div class="ctl">
-      <div class="step"><button data-m="${i}" aria-label="Menos">−</button><input class="qty" id="q${i}" inputmode="decimal" value="${esc(l.cantidad)}" data-q="${i}" aria-label="Cantidad"><button data-p="${i}" aria-label="Más">+</button></div>
-      ${lb ? `<label class="lb"><input id="lb${i}" class="${falta ? "need" : ""}" inputmode="decimal" placeholder="0.0" value="${esc(l.libras)}" data-lb="${i}" aria-label="Libras"><span>lb</span></label>` : ""}
-    </div></div>`;
-}
-
-function cablearLineas(lineas, redibujar, quitarEnCero) {
-  $$("[data-p]").forEach(b => b.onclick = () => { const l = lineas[+b.dataset.p]; l.cantidad = num(l.cantidad) + 1; redibujar(); });
-  $$("[data-m]").forEach(b => b.onclick = () => { const i = +b.dataset.m, l = lineas[i]; l.cantidad = Math.max(0, num(l.cantidad) - 1); if (!l.cantidad && quitarEnCero) lineas.splice(i, 1); redibujar(); });
-  $$("[data-q]").forEach(inp => inp.oninput = () => { lineas[+inp.dataset.q].cantidad = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
-  $$("[data-lb]").forEach(inp => inp.oninput = () => { lineas[+inp.dataset.lb].libras = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
 }
 
 // ---------- Entregas (ruta del domingo) ----------
@@ -398,23 +430,19 @@ function ruta() {
 
 function entrega() {
   const v = S.vista, dist = S.catalogo && S.catalogo.clientes.includes(v.cliente);
-  header("Entregar a " + v.cliente, "Lo que pidió la semana pasada", true);
-  let total = 0, faltaPeso = false;
-  for (const l of v.lineas) {
-    const p = prodCat(l.producto);
-    if (p && p.porLibra) { if (num(l.cantidad) > 0) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist); else faltaPeso = true; } }
-    else total += num(l.cantidad) * precioDe(l.producto, l.presentacion, dist);
-  }
-  const hay = v.lineas.some(l => num(l.cantidad) > 0);
+  header("Entregar a " + v.cliente, "Ya viene con lo que pidió: ajusta o agrega", true);
+  if (!S.catalogo) { $("#screen").innerHTML = `<div class="hint">Cargando lista de productos…</div>`; return; }
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist);
+  const sel = selector(v, dist, true);
   $("#screen").innerHTML = `
-    <div class="hint">Ajusta si dejaste más o menos: con ➖/➕ o escribiendo el número.</div>
-    <div class="prods">${v.lineas.map((l, i) => `<div class="prod on"><div class="n">${esc(l.producto)}</div>${lineaHTML(l, i, prodCat(l.producto), dist)}</div>`).join("")}</div>
+    <div class="hint">Lo que pidió ya viene cargado ("pidió N"). Cambia cantidades con ➖/➕ o escribiéndolas, y agrega lo que no pidió.</div>
+    ${sel.html}
     ${faltaPeso ? `<div class="hint warn">⚖️ Escribe las libras que marcó la balanza. El precio sale del peso, no de las barras.</div>` : ""}
     <div class="confirm">
       <div class="tot"><span class="k">Factura estimada</span><span class="v">${fmt(total)}</span></div>
       <div class="btns"><button class="go" id="conf" ${hay && !faltaPeso ? "" : "disabled"}>${faltaPeso ? "Falta el peso" : "Confirmar entrega"}</button></div>
     </div>`;
-  cablearLineas(v.lineas, entrega, false);
+  cablearSelector(v, sel.filas, entrega, true);
   $("#conf").onclick = () => {
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const p = prodCat(l.producto);
