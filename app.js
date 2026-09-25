@@ -445,19 +445,28 @@ function ruta() {
   if (v.cliente) return entrega();
   const cl = S.ruta.clientes, hechos = cl.filter(c => c.entregado).length;
   header("Ruta de entrega", S.ruta.etiqueta, true);
+  if (hechos) prepararFactura().catch(() => {});
   $("#screen").innerHTML = `
-    <div class="hint">${hechos} de ${cl.length} entregados. ${actualizadoTxt()}.</div>
+    <div class="hint">${hechos} de ${cl.length} entregados. ${actualizadoTxt().replace(/.$/, "")}.${hechos ? " Toca un entregado para compartir su factura." : ""}</div>
     <div class="rows">${cl.length ? cl.map((c, i) => `
       <button class="row ${c.entregado ? "done" : ""}" data-i="${i}">
         <div><div class="nm" style="font-weight:700">${esc(c.cliente)}</div><div class="s">${c.items.map(it => it.cantidad + " " + esc(descLinea(it).toLowerCase())).join(" · ")}</div></div>
-        <div class="r">${c.entregado ? `<span class="pill">Entregado</span>` : `<span class="pill w">Pendiente</span>`} ›</div>
+        <div class="r">${c.entregado ? `<span class="pill">${facturaRuta(c.cliente) ? "🧾 Factura" : "Entregado"}</span>` : `<span class="pill w">Pendiente</span>`} ›</div>
       </button>`).join("") : `<div class="row">No hay pedidos para esta ruta.</div>`}</div>`;
   $$("[data-i]").forEach(b => b.onclick = () => {
     const c = cl[+b.dataset.i];
-    if (c.entregado) { toast(`${c.cliente} ya tiene entrega esta semana`); return; }
+    if (c.entregado) {
+      const f = facturaRuta(c.cliente);
+      if (f) compartirFactura(f);
+      else toast(S.cola.length ? "La factura sale cuando se envíe la entrega (hace falta señal)." : `${c.cliente} ya tiene entrega esta semana`);
+      return;
+    }
     ir("ruta", { cliente: c.cliente, lineas: c.items.map(it => ({ producto: it.producto, presentacion: it.presentacion, sabor: it.sabor, cantidad: it.cantidad, libras: "", pedido: it.cantidad })) });
   });
 }
+
+// La factura de la semana de esta ruta (una por cliente por semana).
+const facturaRuta = cliente => S.ruta && facturasDe(cliente).find(f => f.semana === S.ruta.domingo);
 
 function entrega() {
   const v = S.vista, dist = S.catalogo && S.catalogo.clientes.includes(v.cliente);
@@ -611,6 +620,23 @@ function avisosProveedor() {
   return out;
 }
 
+// ---------- Facturas del cliente (PDF, ver factura.js) ----------
+function facturasDe(cliente) {
+  const c = S.cuentas && S.cuentas.cobrar.find(x => norm(x.cliente) === norm(cliente));
+  return (c && c.facturas) || [];
+}
+function bloqueFacturas(cliente) {
+  const fs = facturasDe(cliente).slice().sort((a, b) => b.semana.localeCompare(a.semana));
+  if (!fs.length) return "";
+  prepararFactura().catch(() => {});
+  return `<div class="label">Facturas para compartir</div>
+    <div class="rows">${fs.map((f, i) => `<button class="row" data-pdf="${i}"><div><div style="font-weight:700">🧾 ${esc(f.num)}</div><div class="s">${esc(fecha(f.semana))} · ${f.items.length} producto${f.items.length === 1 ? "" : "s"}</div></div><div class="r">${fmt(f.total)} · PDF ›</div></button>`).join("")}</div>`;
+}
+function cablearFacturas(cliente) {
+  const fs = facturasDe(cliente).slice().sort((a, b) => b.semana.localeCompare(a.semana));
+  $$("[data-pdf]").forEach(b => b.onclick = () => compartirFactura(fs[+b.dataset.pdf]));
+}
+
 // ---------- Cuentas: 4 niveles, pagos FIFO ----------
 function analizar(docs, pagos) {
   const D = docs.map((d, i) => ({ i, d, total: d.total != null ? d.total : d.items.reduce((a, it) => a + it.total, 0), pagado: 0, aplicados: [] }))
@@ -680,10 +706,12 @@ function ctaDeuda() {
       ${abonos > 0.005 ? `<tr class="sum"><td>Facturas abiertas</td><td></td><td></td><td>${fmt(sub)}</td></tr><tr class="sum"><td>Abonos ya aplicados</td><td></td><td></td><td>−${fmt(abonos)}</td></tr>` : ""}
       <tr class="tot"><td>Pendiente</td><td></td><td></td><td>${fmt(c.debe)}</td></tr></tbody></table></div></div>
     <div class="label">Facturas abiertas</div>
-    <div class="rows">${a.abiertas.map(d => `<button class="row" data-det="${d.i}"><div><div style="font-weight:700">${esc(d.d.n)}</div><div class="s">Total ${fmt(d.total)}${d.pagado > 0.005 ? " · abonado " + fmt(d.pagado) : ""}</div></div><div class="r">${pillEstado(d.estado)} ${fmt(d.pend)} ›</div></button>`).join("")}</div>`;
+    <div class="rows">${a.abiertas.map(d => `<button class="row" data-det="${d.i}"><div><div style="font-weight:700">${esc(d.d.n)}</div><div class="s">Total ${fmt(d.total)}${d.pagado > 0.005 ? " · abonado " + fmt(d.pagado) : ""}</div></div><div class="r">${pillEstado(d.estado)} ${fmt(d.pend)} ›</div></button>`).join("")}</div>
+    ${cobrar ? bloqueFacturas(v.quien) : ""}`;
   const py = $("#pagarYa"); if (py) py.onclick = () => { v.pagando = true; v.quien2 = v.quien; v.monto = ""; ctaDeuda(); };
   const vh = $("#verHist"); if (vh) vh.onclick = () => ir("cuentas", { lado: v.lado, quien: v.quien, nivel: "hist" });
   $$("[data-det]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: v.quien, nivel: "det", doc: +b.dataset.det, desde: "deuda" }));
+  if (cobrar) cablearFacturas(v.quien);
   if (v.pagando) cablearPagoInline(v, c, ctaDeuda);
 }
 function pagoInline(v, c) {
@@ -717,12 +745,13 @@ function ctaHist() {
       <div class="stat"><div class="k">Pagado</div><div class="v" style="font-size:17px">${fmt(c.pagado)}</div></div>
       <div class="stat"><div class="k">${cobrar ? "Debe" : "Debemos"}</div><div class="v" style="font-size:17px;color:${c.debe > 0.005 ? "var(--warn)" : "var(--ok)"}">${fmt(Math.max(c.debe, 0))}</div></div>
     </div>
-    ${cobrar ? "" : `<div class="hint">Desde el punto de partida (${fecha(c.desde)}).</div>`}
+    ${cobrar ? bloqueFacturas(v.quien) + `<div class="label">Movimientos</div>` : `<div class="hint">Desde el punto de partida (${fecha(c.desde)}).</div>`}
     <div class="rows">${filas.map(x => x.d ? `
       <button class="row" data-det="${x.d.i}"><div><div style="font-weight:700">${fecha(x.f)}</div><div class="s">${cobrar ? "Entrega" : "Factura"} · ${x.d.d.items.length} producto${x.d.d.items.length === 1 ? "" : "s"}</div></div><div class="r">${pillEstado(x.d.estado)} ${fmt(x.d.total)} ›</div></button>` : `
       <button class="row" data-pag="${x.p.i}"><div><div style="font-weight:700">${fecha(x.f)}</div><div class="s">${cobrar ? "Pago recibido" : "Pago hecho"}${x.p.p.por ? " · " + esc(x.p.p.por) : ""}${x.p.p.local ? " · ⏳ sin enviar" : ""}</div></div><div class="r" style="color:var(--ok)">−${fmt(x.p.p.monto)} ›</div></button>`).join("")}</div>`;
   $$("[data-det]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: v.quien, nivel: "det", doc: +b.dataset.det, desde: "hist" }));
   $$("[data-pag]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: v.quien, nivel: "det", pago: +b.dataset.pag, desde: "hist" }));
+  if (cobrar) cablearFacturas(v.quien);
 }
 
 function ctaDet() {

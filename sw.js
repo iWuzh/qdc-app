@@ -1,8 +1,8 @@
 // Guarda las pantallas en el teléfono para que la app abra sin señal.
 // Los datos NO pasan por aquí: los registros van en la cola de app.js.
 // Al cambiar cualquier archivo, subir VERSION para que los teléfonos la bajen.
-const VERSION = "qdc-v8";
-const ARCHIVOS = ["./", "index.html", "app.css", "app.js", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const VERSION = "qdc-v9";
+const ARCHIVOS = ["./", "index.html", "app.css", "app.js", "config.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "factura.js", "logo.jpg", "vendor/jspdf.umd.min.js"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(ARCHIVOS)).then(() => self.skipWaiting()));
