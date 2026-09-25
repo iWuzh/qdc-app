@@ -219,7 +219,7 @@ function inicio() {
     <div class="big">
       <button class="act primary" data-go="pedido"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><div><div class="t">Nuevo pedido</div><div class="d">Guardar o entregar</div></div></button>
       <button class="act" data-go="ruta"><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3zM14 10h4l3 3v4h-7"/></svg><div><div class="t">Entregar</div><div class="d">${S.ruta ? pend + " pendientes en ruta" : "Ruta del domingo"}</div></div></button>
-      <button class="act" data-go="recibir"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg><div><div class="t">Recibir</div><div class="d">Mercancía y factura de Ligui</div></div></button>
+      <button class="act" data-go="recibir"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg><div><div class="t">Recibir</div><div class="d">Compras, mercancía y factura de Ligui</div></div></button>
       <button class="act" data-go="cuentas"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg><div><div class="t">Cuentas</div><div class="d">Cobros y deudas pendientes</div></div></button>
     </div>
     ${S.compras && S.compras.bolas ? `<button class="banner bad" id="bolasSinRec" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ Van <b>${S.compras.bolas.faltan}</b> bola${S.compras.bolas.faltan === 1 ? "" : "s"} entregada${S.compras.bolas.faltan === 1 ? "" : "s"} esta semana sin recepción anotada. ¿Falta anotar lo que llegó? Toca para recibir ›</button>` : ""}
@@ -503,6 +503,7 @@ function entrega() {
 function recibir() {
   const v = S.vista;
   if (v.factura) return factura();
+  if (v.lista) return listaCompras();
   if (!S.catalogo) { header("Recibir", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
   if (!v.lineas) precargarRecibir(v, v.modoInicial || "todo");
   header("Recibir mercancía", "Lo recibe " + S.sesion.nombre.split(" ")[0], true);
@@ -510,6 +511,7 @@ function recibir() {
   const sel = selector(v, "compra", true);
   const sinFac = S.cuentas ? S.cuentas.pagar.reduce((a, p) => a + p.sinFactura.length, 0) : 0;
   $("#screen").innerHTML = `
+    <button class="act" id="irLista" style="min-height:0;flex-direction:row;align-items:center;width:100%"><svg viewBox="0 0 24 24"><path d="M3 4h2l2.5 11h11L21 7H7"/><circle cx="9" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg><div><div class="t" style="font-size:17px">Lista de compras</div><div class="d">Lo pedido esta semana, para mandarlo por WhatsApp</div></div></button>
     <div class="seg"><button data-modo="todo" aria-pressed="${v.modo === "todo"}">Todo lo pedido</button><button data-modo="bolas" aria-pressed="${v.modo === "bolas"}">Solo bolas (jueves)</button></div>
     <div class="hint">${S.compras ? `Viene cargado con lo que falta por llegar de lo pedido la semana del ${fecha(S.compras.pedidosDe)}. Corrige lo que llegó distinto y agrega lo que no se pidió.` : "Sin la lista de lo pedido (hace falta señal una vez). Anota lo que llegó."}</div>
     ${sel.html}
@@ -522,6 +524,7 @@ function recibir() {
   $$("[data-modo]").forEach(b => b.onclick = () => { precargarRecibir(v, b.dataset.modo); recibir(); });
   cablearSelector(v, sel.filas, recibir, true);
   $("#irFactura").onclick = () => ir("recibir", { factura: true });
+  $("#irLista").onclick = () => ir("recibir", { lista: true });
   $("#guardarRec").onclick = () => {
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const p = prodCat(l.producto);
@@ -546,6 +549,41 @@ function precargarRecibir(v, modo) {
              nota: `pidieron ${it.pedido}${ya ? " · ya llegó " + ya + (lb ? " lb" : "") : ""}` };
   }).filter(l => l.cantidad > 0 || modo === "bolas");
   if (modo === "bolas" && !v.lineas.length) v.lineas = [{ producto: "Bolas de queso", presentacion: "", sabor: "", cantidad: 0, libras: "", pedido: 1, nota: "" }];
+}
+
+// ---------- Lista de compras (WhatsApp) ----------
+// La misma lista que "lista de compras" del bot (appListaCompras en Api.js):
+// lo pedido esta semana, que se compra el sábado. Se copia o se comparte como
+// texto de WhatsApp (*negrita*), con los nombres bien escritos.
+function textoListaCompras(l) {
+  const a = new Date(l.semana + "T12:00:00"), b = new Date(a); b.setDate(b.getDate() + 6);
+  const cant = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+  let t = `*🛒 Lista de compras · Quesos Don Carlos*\nPedidos del ${a.getDate()}${a.getMonth() === b.getMonth() ? "" : " " + MESES[a.getMonth()]} al ${b.getDate()} ${MESES[b.getMonth()]}\n`;
+  for (const it of l.items) {
+    t += `\n*${pdfNombre([it.producto, it.presentacion.toLowerCase()].filter(Boolean).join(" "))}:* ${cant(it.total)}`;
+    for (const s of it.sabores) t += `\n   • ${s.sabor}: ${cant(s.cantidad)}`;
+  }
+  return t;
+}
+
+function listaCompras() {
+  const l = S.compras && S.compras.lista;
+  header("Lista de compras", l ? "Pedidos de la semana del " + fecha(l.semana) : "", true);
+  if (!l) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista…" : "Hace falta señal una vez para bajar la lista."}</div>`; return; }
+  const texto = l.items.length ? textoListaCompras(l) : "";
+  $("#screen").innerHTML = `
+    <div class="hint">La misma lista que <b>lista de compras</b> del bot: lo pedido esta semana (sin las ventas al momento). ${actualizadoTxt()}.</div>
+    ${l.items.length ? `<div class="card"><pre style="white-space:pre-wrap;font:15px/1.5 var(--body);margin:0">${esc(texto.replace(/\*/g, ""))}</pre></div>
+    <div class="btns"><button class="go" id="copiar">Copiar para WhatsApp</button><button class="go alt" id="compartirLista">Compartir</button></div>`
+    : `<div class="row">Todavía no hay pedidos esta semana.</div>`}`;
+  const co = $("#copiar"); if (co) co.onclick = async () => {
+    try { await navigator.clipboard.writeText(texto); toast("✅ Copiada: pégala en WhatsApp"); }
+    catch (e) { toast("No se pudo copiar. Usa Compartir."); }
+  };
+  const sh = $("#compartirLista"); if (sh) sh.onclick = async () => {
+    if (navigator.share) { try { await navigator.share({ text: texto }); } catch (e) { /* canceló */ } }
+    else { try { await navigator.clipboard.writeText(texto); toast("✅ Copiada: pégala en WhatsApp"); } catch (e) { toast("No se pudo compartir."); } }
+  };
 }
 
 // ---------- Factura del proveedor ----------
@@ -811,7 +849,7 @@ $("#back").onclick = () => {
     return ir("cuentas", { lado: v.lado });
   }
   if (S.tab === "ruta" && v.cliente) return ir("ruta");
-  if (S.tab === "recibir" && v.factura) return ir("recibir");
+  if (S.tab === "recibir" && (v.factura || v.lista)) return ir("recibir");
   ir("inicio");
 };
 $("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };
