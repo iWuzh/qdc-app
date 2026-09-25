@@ -112,12 +112,33 @@ function armarFacturaPDF(f) {
     doc.setDrawColor(...COL.linea); doc.setLineWidth(0.2); doc.line(M, y, W - M, y);
   });
 
+  // Balance del cliente (f.saldo, lo calcula saldoFactura en app.js):
+  // anterior > 0 = debe de semanas anteriores; anterior < 0 = ya abonó a esta.
+  const s = f.saldo || { anterior: 0, pagar: f.total };
+  const pagada0 = s.pagar <= 0.005;
+  const conBalance = Math.abs(s.anterior) > 0.005 && !pagada0;
+  const pagada = pagada0;
   y += 4;
-  if (y + 13 > 186) { doc.addPage(); y = encabezado(false) + 8; }
-  doc.setFillColor(...COL.oscuro); doc.roundedRect(W - M - 70, y, 70, 13, 2, 2, "F");
+  if (y + (conBalance ? 27 : 13) > 186) { doc.addPage(); y = encabezado(false) + 8; }
+  if (conBalance) {
+    const fila = (txt, monto) => {
+      doc.setTextColor(...COL.azul); doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+      doc.text(txt, W - M - 66, y + 4);
+      doc.setFont("helvetica", "bold"); doc.text(monto, W - M - 4, y + 4, { align: "right" });
+      y += 6.5;
+    };
+    fila("Esta factura", pdfMonto(f.total));
+    fila(s.anterior > 0 ? "Balance anterior" : "Abonado", (s.anterior > 0 ? "" : "-") + pdfMonto(Math.abs(s.anterior)));
+    y += 1;
+  }
+  doc.setFillColor(...(pagada ? COL.verde : COL.oscuro)); doc.roundedRect(W - M - 70, y, 70, 13, 2, 2, "F");
   doc.setTextColor(...COL.crema); doc.setFont("helvetica", "bold"); doc.setFontSize(10);
-  doc.text("TOTAL", W - M - 66, y + 8.4);
-  doc.setFontSize(14); doc.text(pdfMonto(f.total), W - M - 4, y + 8.8, { align: "right" });
+  doc.text(pagada ? "PAGADA" : conBalance ? "TOTAL A PAGAR" : "TOTAL", W - M - 66, y + 8.4);
+  doc.setFontSize(14); doc.text(pdfMonto(pagada ? f.total : conBalance ? s.pagar : f.total), W - M - 4, y + 8.8, { align: "right" });
+  if (pagada && s.pagar < -0.005) {
+    doc.setTextColor(...COL.gris); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    doc.text("Saldo a favor: " + pdfMonto(-s.pagar), W - M - 4, y + 18, { align: "right" });
+  }
 
   doc.setTextColor(...COL.verde); doc.setFont("helvetica", "bolditalic"); doc.setFontSize(12);
   doc.text("¡Gracias por su compra!", W / 2, 192, { align: "center" });

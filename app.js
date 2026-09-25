@@ -457,7 +457,7 @@ function ruta() {
     const c = cl[+b.dataset.i];
     if (c.entregado) {
       const f = facturaRuta(c.cliente);
-      if (f) compartirFactura(f);
+      if (f) compartirFacturaCliente(c.cliente, f);
       else toast(S.cola.length ? "La factura sale cuando se envíe la entrega (hace falta señal)." : `${c.cliente} ya tiene entrega esta semana`);
       return;
     }
@@ -634,8 +634,25 @@ function bloqueFacturas(cliente) {
 }
 function cablearFacturas(cliente) {
   const fs = facturasDe(cliente).slice().sort((a, b) => b.semana.localeCompare(a.semana));
-  $$("[data-pdf]").forEach(b => b.onclick = () => compartirFactura(fs[+b.dataset.pdf]));
+  $$("[data-pdf]").forEach(b => b.onclick = () => compartirFacturaCliente(cliente, fs[+b.dataset.pdf]));
 }
+// Balance para el pie de la factura, con los mismos números de Cuentas:
+// anterior = entregado ANTES de esa semana − todo lo pagado hasta hoy;
+// pagar = entregado hasta el final de esa semana − todo lo pagado.
+// (Una factura vieja no suma lo entregado en semanas después de ella.)
+function saldoFactura(cliente, semana) {
+  const c = S.cuentas && S.cuentas.cobrar.find(x => norm(x.cliente) === norm(cliente));
+  if (!c) return null;
+  const fin = new Date(semana + "T12:00:00"); fin.setDate(fin.getDate() + 6);
+  const finIso = fin.toISOString().slice(0, 10);
+  const totalDoc = d => d.items.reduce((a, it) => a + it.total, 0);
+  const antes = c.docs.filter(d => d.fecha < semana).reduce((a, d) => a + totalDoc(d), 0);
+  const hasta = c.docs.filter(d => d.fecha <= finIso).reduce((a, d) => a + totalDoc(d), 0);
+  const pagado = c.pagos.reduce((a, p) => a + p.monto, 0);
+  const r = n => Math.round(n * 100) / 100;
+  return { anterior: r(antes - pagado), pagar: r(hasta - pagado) };
+}
+const compartirFacturaCliente = (cliente, f) => compartirFactura(Object.assign({}, f, { saldo: saldoFactura(cliente, f.semana) }));
 
 // ---------- Cuentas: 4 niveles, pagos FIFO ----------
 function analizar(docs, pagos) {
