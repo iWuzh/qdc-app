@@ -25,6 +25,7 @@ const S = {
   catalogo: leer("catalogo", null),
   ruta: leer("ruta", null),
   cuentas: leer("cuentas", null),
+  compras: leer("compras", null),        // lo pedido al proveedor, para precargar Recibir
   cola: leer("cola", []),                // registros sin enviar
   errores: leer("errores", []),          // registros que el servidor rechazó
   actualizado: leer("actualizado", null),
@@ -61,6 +62,15 @@ function aplicarLocal(reg) {
     const p = S.cuentas.pagar.find(x => x.proveedor === reg.proveedor);
     if (p) { p.pagos.push({ fecha: hoyIso(), monto: reg.monto, por: S.sesion.nombre, local: true }); p.pagado += reg.monto; p.debe -= reg.monto; }
   }
+  if (reg.tipo === "factura" && S.cuentas) {
+    const p = S.cuentas.pagar.find(x => x.proveedor === reg.proveedor);
+    if (p) {
+      const i = p.sinFactura.findIndex(x => x.semana === reg.semana);
+      const sem = i >= 0 ? p.sinFactura.splice(i, 1)[0] : { items: [], total: 0 };
+      p.docs.push({ fecha: hoyIso(), semana: reg.semana, total: reg.monto, proyectado: sem.total, items: sem.items, avisos: avisosFactura(sem, reg.monto), local: true });
+      p.facturado += reg.monto; p.debe += reg.monto;
+    }
+  }
   if (reg.tipo === "entrega" && S.ruta) {
     const c = S.ruta.clientes.find(x => x.cliente === reg.cliente);
     if (c) c.entregado = true;
@@ -95,13 +105,14 @@ async function sincronizar() {
 const repintar = () => { const a = document.activeElement; if (!a || a.tagName !== "INPUT") pintar(); };
 async function refrescar() {
   try {
-    // Las tres consultas a la vez; cada una pinta apenas llega.
+    // Las consultas van a la vez; cada una pinta apenas llega.
     const hoy = hoyIso();
     const pedirCatalogo = !S.catalogo || leer("catalogoDia", "") !== hoy;
     await Promise.all([
       pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); repintar(); } }),
       llamar({ accion: "ruta" }).then(ru => { if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); repintar(); } }),
-      llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); repintar(); } })
+      llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); repintar(); } }),
+      llamar({ accion: "compras" }).then(co => { if (co.ok) { S.compras = co.compras; guardar("compras", S.compras); repintar(); } })
     ]);
     S.actualizado = new Date().toISOString(); guardar("actualizado", S.actualizado);
     S.enLinea = true;
@@ -133,7 +144,7 @@ function pintar() {
   $("#tabs").hidden = !S.sesion;
   $$("#tabs button").forEach(b => b.dataset.tab === S.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   if (!S.sesion || S.sesion.pinVencido) { $("#tabs").hidden = true; return login(); }
-  ({ inicio, pedido, ruta, cuentas })[S.tab]();
+  ({ inicio, pedido, ruta, recibir, cuentas })[S.tab]();
 }
 
 // ---------- Login ----------
@@ -185,6 +196,7 @@ function inicio() {
   const nosDeben = deben.reduce((a, c) => a + c.debe, 0);
   const debemos = S.cuentas ? S.cuentas.pagar.reduce((a, p) => a + Math.max(p.debe, 0), 0) : 0;
   const pend = S.ruta ? S.ruta.clientes.filter(c => !c.entregado).length : 0;
+  const avisos = avisosProveedor();
   $("#screen").innerHTML = `
     ${S.errores.length ? `<div class="banner bad">⚠️ ${S.errores.length} registro${S.errores.length > 1 ? "s" : ""} no se pudo guardar. <button class="add" id="verErr" style="margin-top:6px">Ver</button></div>` : ""}
     <div class="quick">
@@ -196,8 +208,10 @@ function inicio() {
     <div class="big">
       <button class="act primary" data-go="pedido"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><div><div class="t">Nuevo pedido</div><div class="d">Guardar o entregar</div></div></button>
       <button class="act" data-go="ruta"><svg viewBox="0 0 24 24"><path d="M3 7h11v10H3zM14 10h4l3 3v4h-7"/></svg><div><div class="t">Entregar</div><div class="d">${S.ruta ? pend + " pendientes en ruta" : "Ruta del domingo"}</div></div></button>
-      <button class="act" data-go="cuentas" style="grid-column:1/-1;min-height:0;flex-direction:row;align-items:center"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg><div><div class="t">Cuentas</div><div class="d">Cobros y deudas pendientes</div></div></button>
+      <button class="act" data-go="recibir"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg><div><div class="t">Recibir</div><div class="d">Mercancía y factura de Ligui</div></div></button>
+      <button class="act" data-go="cuentas"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg><div><div class="t">Cuentas</div><div class="d">Cobros y deudas pendientes</div></div></button>
     </div>
+    ${avisos.length ? `<button class="banner" id="verAvisos" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ ${avisos.length} aviso${avisos.length > 1 ? "s" : ""} con el proveedor: ${esc(avisos[0])} ›</button>` : ""}
     <div class="stats">
       <div class="stat"><div class="k">Nos deben</div><div class="v">${S.cuentas ? fmt(nosDeben) : "—"}</div></div>
       <div class="stat"><div class="k">Le debemos</div><div class="v">${S.cuentas ? fmt(debemos) : "—"}</div></div>
@@ -207,6 +221,7 @@ function inicio() {
   $$("[data-go]").forEach(b => b.onclick = () => ir(b.dataset.go));
   $$("[data-rap]").forEach(b => b.onclick = () => { v.rapido = v.rapido === b.dataset.rap ? null : b.dataset.rap; v.quien = null; v.monto = ""; v.desc = ""; inicio(); });
   const ve = $("#verErr"); if (ve) ve.onclick = () => ir("inicio", { errores: true });
+  const va = $("#verAvisos"); if (va) va.onclick = () => ir("cuentas", { lado: "pagar" });
   $("#salir").onclick = () => {
     if (S.cola.length) { toast("Hay registros sin enviar. Espera a tener señal antes de salir."); return; }
     S.sesion = null; guardar("sesion", null); ir("inicio");
@@ -270,6 +285,8 @@ function describir(r) {
   if (r.tipo === "cobro") return `Cobro de ${r.cliente} · ${fmt(r.monto)}`;
   if (r.tipo === "pago") return `Pago a ${r.proveedor} · ${fmt(r.monto)}`;
   if (r.tipo === "gasto") return `Gasto ${r.descripcion} · ${fmt(r.monto)}`;
+  if (r.tipo === "factura") return `Factura de ${r.proveedor} (semana del ${fecha(r.semana)}) · ${fmt(r.monto)}`;
+  if (r.tipo === "recepcion") return "Recibido: " + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
   return `${{ pedido: "Pedido", venta: "Venta", entrega: "Entrega" }[r.tipo]} de ${r.cliente}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
 }
 
@@ -278,7 +295,8 @@ const prodCat = n => (S.catalogo.productos || []).find(p => norm(p.nombre) === n
 function precioDe(producto, presentacion, dist) {
   const p = prodCat(producto); if (!p) return 0;
   const pr = presentacion ? (p.presentaciones.find(x => norm(x.nombre) === norm(presentacion)) || {}) : p;
-  return (dist ? pr.distribucion : pr.contado) || 0;
+  // dist: true = Distribución, false = Contado, "compra" = costo (Recibir).
+  return (dist === "compra" ? pr.compra : dist ? pr.distribucion : pr.contado) || 0;
 }
 const descLinea = l => [l.producto, l.presentacion, l.sabor].filter(Boolean).join(" · ");
 
@@ -314,7 +332,7 @@ function selector(v, dist, esEntrega) {
     const precio = precioDe(p.nombre, pr, dist);
     const falta = p.porLibra && num(q) > 0 && !(num(l && l.libras) > 0);
     return `<div class="ln" style="${num(q) > 0 ? "" : "opacity:.85"}">
-      <div><div class="d">${esc(etiqueta)}</div><div class="x">${precio ? fmt(precio) + (p.porLibra ? "/lb" : " c/u") : ""}${esEntrega && l && l.pedido ? ` · pidió ${l.pedido}` : ""}</div></div>
+      <div><div class="d">${esc(etiqueta)}</div><div class="x">${precio ? fmt(precio) + (p.porLibra ? "/lb" : " c/u") : ""}${l && l.nota ? ` · ${esc(l.nota)}` : esEntrega && l && l.pedido ? ` · pidió ${l.pedido}` : ""}</div></div>
       <div class="ctl">
         <div class="step"><button data-menos="${esc(k)}" aria-label="Menos">−</button><input class="qty" id="${id}" inputmode="decimal" placeholder="0" value="${esc(num(q) ? q : "")}" data-cant="${esc(k)}" aria-label="Cantidad"><button data-mas="${esc(k)}" aria-label="Más">+</button></div>
         ${p.porLibra && num(q) > 0 ? `<label class="lb"><input id="${id}lb" class="${falta ? "need" : ""}" inputmode="decimal" placeholder="0.0" value="${esc(l.libras)}" data-lbs="${esc(k)}" aria-label="Libras"><span>lb</span></label>` : ""}
@@ -455,6 +473,131 @@ function entrega() {
   };
 }
 
+// ---------- Recibir (mercancía del proveedor) ----------
+// Lo que llega esta semana (domingo + jueves) es lo que se pidió la semana
+// anterior. Viene precargado con lo que falta por llegar (pedido − ya
+// recibido); se corrige lo que llegó distinto. Se guarda con el mismo comando
+// "recibido …" del bot, a precio de compra. Quien recibe = el del PIN.
+function recibir() {
+  const v = S.vista;
+  if (v.factura) return factura();
+  if (!S.catalogo) { header("Recibir", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
+  if (!v.lineas) precargarRecibir(v, "todo");
+  header("Recibir mercancía", "Lo recibe " + S.sesion.nombre.split(" ")[0], true);
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, "compra");
+  const sel = selector(v, "compra", true);
+  const sinFac = S.cuentas ? S.cuentas.pagar.reduce((a, p) => a + p.sinFactura.length, 0) : 0;
+  $("#screen").innerHTML = `
+    <div class="seg"><button data-modo="todo" aria-pressed="${v.modo === "todo"}">Todo lo pedido</button><button data-modo="bolas" aria-pressed="${v.modo === "bolas"}">Solo bolas (jueves)</button></div>
+    <div class="hint">${S.compras ? `Viene cargado con lo que falta por llegar de lo pedido la semana del ${fecha(S.compras.pedidosDe)}. Corrige lo que llegó distinto y agrega lo que no se pidió.` : "Sin la lista de lo pedido (hace falta señal una vez). Anota lo que llegó."}</div>
+    ${sel.html}
+    ${faltaPeso ? `<div class="hint warn">⚖️ Los quesos por libra se reciben por las libras de la balanza, no por las barras.</div>` : ""}
+    <div class="confirm">
+      <div class="tot"><span class="k">Costo estimado</span><span class="v">${fmt(total)}</span></div>
+      <div class="btns"><button class="go" id="guardarRec" ${hay && !faltaPeso ? "" : "disabled"}>${faltaPeso && hay ? "Falta el peso" : "Guardar recepción"}</button></div>
+    </div>
+    <button class="act" id="irFactura" style="min-height:0;flex-direction:row;align-items:center;width:100%;margin-top:12px"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg><div><div class="t" style="font-size:17px">Anotar factura de Ligui</div><div class="d">${sinFac ? sinFac + " semana" + (sinFac > 1 ? "s" : "") + " esperando factura" : "Llega el domingo después del jueves"}</div></div></button>`;
+  $$("[data-modo]").forEach(b => b.onclick = () => { precargarRecibir(v, b.dataset.modo); recibir(); });
+  cablearSelector(v, sel.filas, recibir, true);
+  $("#irFactura").onclick = () => ir("recibir", { factura: true });
+  $("#guardarRec").onclick = () => {
+    const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
+      const p = prodCat(l.producto);
+      // Por libra: se recibe por las LIBRAS (así calcula el costo el bot).
+      return { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: p && p.porLibra ? num(l.libras) : num(l.cantidad) };
+    });
+    encolar({ tipo: "recepcion", items });
+    toast("✅ Recepción guardada");
+    ir("inicio");
+  };
+}
+
+function precargarRecibir(v, modo) {
+  v.modo = modo;
+  const items = (S.compras ? S.compras.items : []).filter(it => modo === "todo" || norm(it.producto) === "bolas de queso");
+  v.lineas = items.map(it => {
+    const p = prodCat(it.producto), lb = p && p.porLibra;
+    // Por libra se pide en barras y se recibe en libras: no se puede restar.
+    const falta = lb ? (it.recibido > 0 ? 0 : it.pedido) : Math.max(0, Math.round((it.pedido - it.recibido) * 100) / 100);
+    const ya = Math.round(it.recibido * 100) / 100;
+    return { producto: it.producto, presentacion: it.presentacion, sabor: it.sabor, cantidad: falta, libras: "", pedido: it.pedido,
+             nota: `pidieron ${it.pedido}${ya ? " · ya llegó " + ya + (lb ? " lb" : "") : ""}` };
+  }).filter(l => l.cantidad > 0 || modo === "bolas");
+  if (modo === "bolas" && !v.lineas.length) v.lineas = [{ producto: "Bolas de queso", presentacion: "", sabor: "", cantidad: 0, libras: "", pedido: 1, nota: "" }];
+}
+
+// ---------- Factura del proveedor ----------
+// Nadie dice qué semana cubre: de domingo a miércoles es la semana que cerró
+// (la factura llega el domingo después del jueves); de jueves a sábado, la
+// semana en curso. Misma regla que semanaCubiertaPorFactura (Facturas.js).
+// La semana viaja con el registro: si se manda días después sin señal, no cambia.
+function semanaDeFactura(d) {
+  d = d || new Date();
+  const dom = new Date(d.getFullYear(), d.getMonth(), d.getDate() - d.getDay());
+  if (d.getDay() < 4) dom.setDate(dom.getDate() - 7);
+  const p = n => String(n).padStart(2, "0");
+  return `${dom.getFullYear()}-${p(dom.getMonth() + 1)}-${p(dom.getDate())}`;
+}
+// Mismo margen que el servidor: RD$500 o 1%, lo que sea mayor.
+const margenFactura = m => Math.max(500, Math.abs(m) * 0.01);
+function avisosFactura(sem, monto) {
+  const av = (sem.avisos || []).filter(t => !/Falta la factura/.test(t));
+  if (monto > 0 && Math.abs(sem.total - monto) > margenFactura(monto))
+    av.push(`La factura no cuadra: ${fmt(Math.abs(sem.total - monto))} ${monto > sem.total ? "más" : "menos"} que lo proyectado. Si Bululú cambió un precio, hay que actualizar el Precio Compra.`);
+  return av;
+}
+
+function factura() {
+  const v = S.vista;
+  const provs = S.cuentas ? S.cuentas.pagar : [];
+  v.prov = v.prov || (provs[0] && provs[0].proveedor);
+  const p = provs.find(x => x.proveedor === v.prov);
+  const semana = semanaDeFactura();
+  const dom = new Date(semana + "T12:00:00"), jue = new Date(dom); jue.setDate(jue.getDate() + 4);
+  header("Factura de " + (v.prov || "proveedor"), `Semana del ${fecha(semana)} (dom ${dom.getDate()} + jue ${jue.getDate()})`, true);
+  if (!p) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando cuentas…" : "Hace falta señal una vez para bajar las cuentas."}</div>`; return; }
+  const yaTiene = p.docs.find(d => d.semana === semana);
+  const sem = p.sinFactura.find(x => x.semana === semana) || { semana, items: [], total: 0, avisos: [] };
+  const m = num(v.monto);
+  const avisos = avisosFactura(sem, m);
+  if (!sem.items.length && !yaTiene) avisos.unshift(`No hay nada recibido en la semana del ${fecha(semana)}. Anota primero lo que llegó.`);
+  $("#screen").innerHTML = `
+    ${provs.length > 1 ? `<div class="chips">${provs.map(x => `<button class="chip sm" data-prov="${esc(x.proveedor)}" aria-pressed="${x.proveedor === v.prov}">${esc(x.proveedor)}</button>`).join("")}</div>` : ""}
+    ${yaTiene ? `<div class="banner bad">Ya hay una factura de ${fmt(yaTiene.total)} para esta semana (anotada el ${fecha(yaTiene.fecha)}). Si esta es otra, revísalo antes de guardar.</div>` : ""}
+    <div class="card"><div style="overflow-x:auto"><table class="tabla">
+      <thead><tr><th>Recibido</th><th>Cant.</th><th>Subtotal</th></tr></thead><tbody>
+      ${sem.items.map(it => `<tr><td>${esc(it.d)}</td><td>${cantTxt(it)}</td><td>${fmt(it.total)}</td></tr>`).join("") || `<tr><td colspan="3" class="hint">Nada recibido esta semana.</td></tr>`}
+      <tr class="tot"><td>Proyectado</td><td></td><td>${fmt(sem.total)}</td></tr></tbody></table></div></div>
+    <div class="label">Monto de la factura</div>
+    <label class="monto"><span>RD$</span><input id="facMonto" inputmode="decimal" placeholder="Lo que dice la factura" value="${esc(v.monto)}"></label>
+    ${m > 0 ? `<div class="efecto">${Math.abs(sem.total - m) < 0.005 ? "✅ Cuadra exacto con lo proyectado." : sem.total > m ? `🟢 Facturaron ${fmt(sem.total - m)} menos de lo proyectado.` : `🔴 Facturaron ${fmt(m - sem.total)} más de lo proyectado.`}</div>` : ""}
+    ${avisos.map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("")}
+    <div class="hint">La diferencia no bloquea: se guarda igual y el aviso queda para revisarlo. Buena práctica: manda la foto de la factura de Bululú al grupo.</div>
+    <div class="btns"><button class="go" id="facOk" ${m > 0 ? "" : "disabled"}>Guardar factura</button></div>`;
+  $$("[data-prov]").forEach(b => b.onclick = () => { v.prov = b.dataset.prov; factura(); });
+  $("#facMonto").oninput = e => { v.monto = e.target.value.replace(/[^0-9.,]/g, ""); conFoco(factura); };
+  $("#facOk").onclick = () => {
+    encolar({ tipo: "factura", proveedor: v.prov, monto: m, semana });
+    toast(`✅ Factura de ${v.prov} · ${fmt(m)}`);
+    ir("cuentas", { lado: "pagar" });
+  };
+}
+
+// Avisos abiertos con el proveedor (facturas que no cuadran, recepciones que
+// faltan, semanas sin factura). Los calcula el servidor; aquí solo se muestran.
+// Solo las últimas 3 semanas: lo más viejo lo revisa el chequeo del lunes, y
+// lo que se decide ignorar se cierra allá con su conclusión.
+function avisosProveedor() {
+  if (!S.cuentas) return [];
+  const desde = new Date(Date.now() - 21 * 864e5).toISOString().slice(0, 10);
+  const out = [];
+  for (const p of S.cuentas.pagar) {
+    for (const d of p.docs) if ((d.semana || d.fecha) >= desde) for (const t of d.avisos || []) out.push(`Factura de la semana del ${fecha(d.semana)}: ${t}`);
+    for (const s of p.sinFactura) if (s.semana >= desde) for (const t of s.avisos || []) out.push(`Semana del ${fecha(s.semana)}: ${t}`);
+  }
+  return out;
+}
+
 // ---------- Cuentas: 4 niveles, pagos FIFO ----------
 function analizar(docs, pagos) {
   const D = docs.map((d, i) => ({ i, d, total: d.total != null ? d.total : d.items.reduce((a, it) => a + it.total, 0), pagado: 0, aplicados: [] }))
@@ -491,6 +634,7 @@ function cuentas() {
     <div class="rows">${conDeuda.map(x => { const a = analizar(docsDe(x.c, cobrar), x.c.pagos); return `
       <button class="row" data-q="${esc(x.n)}"><div><div style="font-weight:700">${esc(x.n)}</div><div class="s">${a.abiertas.length} factura${a.abiertas.length === 1 ? "" : "s"} abierta${a.abiertas.length === 1 ? "" : "s"}${a.abiertas.length ? " · la más vieja " + diasTxt(a.dias) : ""}</div></div><div class="r">${fmt(x.c.debe)} ›</div></button>`; }).join("") || `<div class="row">${cobrar ? "Nadie nos debe nada 🎉" : "No le debemos nada a nadie 🎉"}</div>`}</div>
     ${!cobrar ? S.cuentas.pagar.filter(p => p.sinFactura.length).map(p => `<div class="banner">📦 A ${esc(p.proveedor)}: recibido sin factura todavía ${fmt(p.sinFactura.reduce((a, s) => a + s.total, 0))} (${p.sinFactura.map(s => "semana del " + fecha(s.semana)).join(", ")}). No suma a la deuda hasta que llegue la factura.</div>`).join("") : ""}
+    ${!cobrar ? avisosProveedor().map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("") : ""}
     ${alDia.length ? `<details><summary class="hint">${cobrar ? "Clientes" : "Proveedores"} al día (${alDia.length})</summary><div class="rows" style="margin-top:8px">${alDia.map(x => `<button class="row" data-qh="${esc(x.n)}"><div style="font-weight:700">${esc(x.n)}</div><div class="r"><span class="pill">Al día</span> ›</div></button>`).join("")}</div></details>` : ""}`;
   $$("[data-lado]").forEach(b => b.onclick = () => ir("cuentas", { lado: b.dataset.lado }));
   $$("[data-q]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: b.dataset.q, nivel: "deuda" }));
@@ -499,7 +643,7 @@ function cuentas() {
 function cuentaSel() { const v = S.vista; return v.lado === "cobrar" ? S.cuentas.cobrar.find(c => c.cliente === v.quien) : S.cuentas.pagar.find(p => p.proveedor === v.quien); }
 function docsDe(c, cobrar) {
   return cobrar ? c.docs.map(d => ({ fecha: d.fecha, n: "Entrega del " + fecha(d.fecha), items: d.items.map(it => ({ d: it.d, q: it.q, u: it.u, total: it.total })) }))
-                : c.docs.map(d => ({ fecha: d.fecha, n: "Factura del " + fecha(d.fecha), total: d.total, items: d.items }));
+                : c.docs.map(d => ({ fecha: d.fecha, n: "Factura del " + fecha(d.fecha), total: d.total, items: d.items, semana: d.semana, avisos: d.avisos || [] }));
 }
 
 function ctaDeuda() {
@@ -583,12 +727,13 @@ function ctaDet() {
     return;
   }
   const d = a.D.find(x => x.i === v.doc);
-  header(d.d.n, v.quien, true);
+  header(d.d.n, v.quien + (d.d.semana ? " · cubre la semana del " + fecha(d.d.semana) : ""), true);
   $("#screen").innerHTML = `
+    ${(d.d.avisos || []).map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("")}
     <div class="card"><div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Producto</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead><tbody>
       ${d.d.items.map(it => `<tr><td>${esc(it.d)}</td><td>${cantTxt(it)}</td><td>${it.q ? fmt(it.total / it.q) + (it.u ? "/" + it.u : "") : ""}</td><td>${fmt(it.total)}</td></tr>`).join("") || `<tr><td colspan="4" class="hint">Sin detalle de productos.</td></tr>`}
-      ${!cobrar && d.d.items.length && Math.abs(d.d.items.reduce((s, it) => s + it.total, 0) - d.total) > 1 ? `<tr class="sum"><td>Recibido a costo</td><td></td><td></td><td>${fmt(d.d.items.reduce((s, it) => s + it.total, 0))}</td></tr>` : ""}
+      ${!cobrar && d.d.items.length && Math.abs(d.d.items.reduce((s, it) => s + it.total, 0) - d.total) > 1 ? `<tr class="sum"><td>Proyectado (recibido a costo)</td><td></td><td></td><td>${fmt(d.d.items.reduce((s, it) => s + it.total, 0))}</td></tr>` : ""}
       <tr class="tot"><td>Total</td><td></td><td></td><td>${fmt(d.total)}</td></tr></tbody></table></div></div>
     <div class="card">
       <div class="line"><b>Estado</b>${pillEstado(d.estado)}</div>
@@ -607,6 +752,7 @@ $("#back").onclick = () => {
     return ir("cuentas", { lado: v.lado });
   }
   if (S.tab === "ruta" && v.cliente) return ir("ruta");
+  if (S.tab === "recibir" && v.factura) return ir("recibir");
   ir("inicio");
 };
 $("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };
