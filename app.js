@@ -71,6 +71,17 @@ function aplicarLocal(reg) {
       p.facturado += reg.monto; p.debe += reg.monto;
     }
   }
+  // Bolas entregadas sin recepción anotada: se ajusta al momento, sin esperar
+  // al servidor (una entrega sube lo que falta; una recepción lo baja).
+  if (S.compras && ["entrega", "venta", "recepcion"].includes(reg.tipo)) {
+    const q = (reg.items || []).filter(i => norm(i.producto) === "bolas de queso").reduce((a, i) => a + num(i.cantidad), 0);
+    if (q) {
+      const b = S.compras.bolas || { faltan: 0 };
+      b.faltan += reg.tipo === "recepcion" ? -q : q;
+      S.compras.bolas = b.faltan > 0 ? b : null;
+      guardar("compras", S.compras);
+    }
+  }
   if (reg.tipo === "entrega" && S.ruta) {
     const c = S.ruta.clientes.find(x => x.cliente === reg.cliente);
     if (c) c.entregado = true;
@@ -211,6 +222,7 @@ function inicio() {
       <button class="act" data-go="recibir"><svg viewBox="0 0 24 24"><path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/></svg><div><div class="t">Recibir</div><div class="d">Mercancía y factura de Ligui</div></div></button>
       <button class="act" data-go="cuentas"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg><div><div class="t">Cuentas</div><div class="d">Cobros y deudas pendientes</div></div></button>
     </div>
+    ${S.compras && S.compras.bolas ? `<button class="banner bad" id="bolasSinRec" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ Van <b>${S.compras.bolas.faltan}</b> bola${S.compras.bolas.faltan === 1 ? "" : "s"} entregada${S.compras.bolas.faltan === 1 ? "" : "s"} esta semana sin recepción anotada. ¿Falta anotar lo que llegó? Toca para recibir ›</button>` : ""}
     ${avisos.length ? `<button class="banner" id="verAvisos" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ ${avisos.length} aviso${avisos.length > 1 ? "s" : ""} con el proveedor: ${esc(avisos[0])} ›</button>` : ""}
     <div class="stats">
       <div class="stat"><div class="k">Nos deben</div><div class="v">${S.cuentas ? fmt(nosDeben) : "—"}</div></div>
@@ -222,6 +234,7 @@ function inicio() {
   $$("[data-rap]").forEach(b => b.onclick = () => { v.rapido = v.rapido === b.dataset.rap ? null : b.dataset.rap; v.quien = null; v.monto = ""; v.desc = ""; inicio(); });
   const ve = $("#verErr"); if (ve) ve.onclick = () => ir("inicio", { errores: true });
   const va = $("#verAvisos"); if (va) va.onclick = () => ir("cuentas", { lado: "pagar" });
+  const bs = $("#bolasSinRec"); if (bs) bs.onclick = () => ir("recibir", { modoInicial: "bolas" });
   $("#salir").onclick = () => {
     if (S.cola.length) { toast("Hay registros sin enviar. Espera a tener señal antes de salir."); return; }
     S.sesion = null; guardar("sesion", null); ir("inicio");
@@ -482,7 +495,7 @@ function recibir() {
   const v = S.vista;
   if (v.factura) return factura();
   if (!S.catalogo) { header("Recibir", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
-  if (!v.lineas) precargarRecibir(v, "todo");
+  if (!v.lineas) precargarRecibir(v, v.modoInicial || "todo");
   header("Recibir mercancía", "Lo recibe " + S.sesion.nombre.split(" ")[0], true);
   const { total, faltaPeso, hay } = totalLineas(v.lineas, "compra");
   const sel = selector(v, "compra", true);
