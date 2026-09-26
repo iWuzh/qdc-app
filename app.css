@@ -141,3 +141,5 @@ input.qty{width:56px;height:40px;border-radius:11px;border:1.5px solid var(--lin
 .rep-grupo summary::-webkit-details-marker{display:none}
 .rep-hijos{margin-top:10px;padding-left:12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:12px}
 .rep-hijo .line b{font-size:14px}
+.rep-fl{font-size:13px;font-weight:700;margin-left:4px}
+.rep-tot{border-top:1px solid var(--line);padding-top:8px}
