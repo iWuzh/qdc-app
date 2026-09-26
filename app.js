@@ -589,7 +589,9 @@ function listaCompras() {
   const l = S.compras && S.compras.lista;
   header("Lista de compras", l ? "Pedidos de la semana del " + fecha(l.semana) : "", true);
   if (!l) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista…" : "Hace falta señal una vez para bajar la lista."}</div>`; return; }
-  const texto = l.items.length ? textoListaCompras(l) : "";
+  // El texto del bot tal cual (la plantilla que ya usan). El armado propio
+  // queda solo de respaldo si el servidor todavía no lo manda.
+  const texto = l.items.length ? (l.texto || textoListaCompras(l)) : "";
   $("#screen").innerHTML = `
     <div class="hint">La misma lista que <b>lista de compras</b> del bot: lo pedido esta semana (sin las ventas al momento). ${actualizadoTxt()}.</div>
     ${l.items.length ? `<div class="card"><pre style="white-space:pre-wrap;font:15px/1.5 var(--body);margin:0">${esc(texto.replace(/\*/g, ""))}</pre></div>
