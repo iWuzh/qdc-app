@@ -738,7 +738,14 @@ function cuentas() {
   const cobrar = v.lado === "cobrar";
   const filas = cobrar ? S.cuentas.cobrar.map(c => ({ n: c.cliente, c })) : S.cuentas.pagar.map(p => ({ n: p.proveedor, c: p }));
   const conDeuda = filas.filter(x => x.c.debe > 0.005).sort((a, b) => b.c.debe - a.c.debe);
-  const alDia = filas.filter(x => x.c.debe <= 0.005);
+  // Al día, de mayor a menor venta promedio por semana desde el corte (el
+  // total se divide entre TODAS las semanas desde el corte, no solo las que
+  // compró: el que compra seguido va arriba). Proveedores: como estaban.
+  const corte = (S.reportes && S.reportes.cobranza && S.reportes.cobranza.desde) || "2026-08-30";
+  const semanasCorte = Math.max(1, Math.ceil((Date.now() - new Date(corte + "T00:00:00")) / (7 * 864e5)));
+  const vendidoDesde = c => c.docs.filter(d => d.fecha >= corte).reduce((a, d) => a + d.items.reduce((s, it) => s + it.total, 0), 0);
+  const alDia = filas.filter(x => x.c.debe <= 0.005).map(x => Object.assign(x, cobrar ? { tot: vendidoDesde(x.c), prom: vendidoDesde(x.c) / semanasCorte } : {}))
+    .sort((a, b) => cobrar ? b.prom - a.prom : 0);
   const total = conDeuda.reduce((a, x) => a + x.c.debe, 0);
   header(cobrar ? "Cobros pendientes" : "Deudas pendientes", actualizadoTxt(), true);
   $("#screen").innerHTML = `
@@ -748,7 +755,11 @@ function cuentas() {
       <button class="row" data-q="${esc(x.n)}"><div><div style="font-weight:700">${esc(x.n)}</div><div class="s">${a.abiertas.length} factura${a.abiertas.length === 1 ? "" : "s"} abierta${a.abiertas.length === 1 ? "" : "s"}${a.abiertas.length ? " · la más vieja " + diasTxt(a.dias) : ""}</div></div><div class="r">${fmt(x.c.debe)} ›</div></button>`; }).join("") || `<div class="row">${cobrar ? "Nadie nos debe nada 🎉" : "No le debemos nada a nadie 🎉"}</div>`}</div>
     ${!cobrar ? S.cuentas.pagar.filter(p => p.sinFactura.length).map(p => `<div class="banner">📦 A ${esc(p.proveedor)}: recibido sin factura todavía ${fmt(p.sinFactura.reduce((a, s) => a + s.total, 0))} (${p.sinFactura.map(s => "semana del " + fecha(s.semana)).join(", ")}). No suma a la deuda hasta que llegue la factura.</div>`).join("") : ""}
     ${!cobrar ? avisosProveedor().map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("") : ""}
-    ${alDia.length ? `<details><summary class="hint">${cobrar ? "Clientes" : "Proveedores"} al día (${alDia.length})</summary><div class="rows" style="margin-top:8px">${alDia.map(x => `<button class="row" data-qh="${esc(x.n)}"><div style="font-weight:700">${esc(x.n)}</div><div class="r"><span class="pill">Al día</span> ›</div></button>`).join("")}</div></details>` : ""}`;
+    ${alDia.length ? `<details><summary class="hint">${cobrar ? "Clientes" : "Proveedores"} al día (${alDia.length})</summary><div class="rows" style="margin-top:8px">${cobrar ? `<div class="hint">De mayor a menor venta promedio por semana desde el corte (${fecha(corte)}).</div>` : ""}${alDia.map((x, i) => cobrar
+      ? (x.tot > 0.5
+        ? `<button class="row" data-qh="${esc(x.n)}"><div><div style="font-weight:700">#${i + 1} ${esc(x.n)}</div><div class="s">${fmt(x.tot)} desde el corte</div></div><div class="r">${fmt(Math.round(x.prom))}/sem <span class="pill">Al día</span> ›</div></button>`
+        : `<button class="row" data-qh="${esc(x.n)}"><div><div style="font-weight:700">${esc(x.n)}</div><div class="s">sin compras desde el corte</div></div><div class="r"><span class="pill">Al día</span> ›</div></button>`)
+      : `<button class="row" data-qh="${esc(x.n)}"><div style="font-weight:700">${esc(x.n)}</div><div class="r"><span class="pill">Al día</span> ›</div></button>`).join("")}</div></details>` : ""}`;
   $$("[data-lado]").forEach(b => b.onclick = () => ir("cuentas", { lado: b.dataset.lado }));
   $$("[data-q]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: b.dataset.q, nivel: "deuda" }));
   $$("[data-qh]").forEach(b => b.onclick = () => ir("cuentas", { lado: v.lado, quien: b.dataset.qh, nivel: "hist" }));
