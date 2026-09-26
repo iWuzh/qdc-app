@@ -233,6 +233,7 @@ function inicio() {
       <button class="act" data-go="cuentas"><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/></svg><div><div class="t">Cuentas</div><div class="d">Cobros y deudas pendientes</div></div></button>
     </div>
     ${S.compras && S.compras.bolas ? `<button class="banner bad" id="bolasSinRec" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ Van <b>${S.compras.bolas.faltan}</b> bola${S.compras.bolas.faltan === 1 ? "" : "s"} entregada${S.compras.bolas.faltan === 1 ? "" : "s"} esta semana sin recepción anotada. ¿Falta anotar lo que llegó? Toca para recibir ›</button>` : ""}
+    ${avisoSinResponsable()}
     ${avisos.length ? `<button class="banner" id="verAvisos" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ ${avisos.length} aviso${avisos.length > 1 ? "s" : ""} con el proveedor: ${esc(avisos[0])} ›</button>` : ""}
     <div class="stats">
       <div class="stat"><div class="k">Nos deben</div><div class="v">${S.cuentas ? fmt(nosDeben) : "—"}</div></div>
@@ -245,6 +246,7 @@ function inicio() {
   const ve = $("#verErr"); if (ve) ve.onclick = () => ir("inicio", { errores: true });
   const va = $("#verAvisos"); if (va) va.onclick = () => ir("cuentas", { lado: "pagar" });
   const bs = $("#bolasSinRec"); if (bs) bs.onclick = () => ir("recibir", { modoInicial: "bolas" });
+  cablearSinResponsable();
   $("#salir").onclick = () => {
     if (S.cola.length) { toast("Hay registros sin enviar. Espera a tener señal antes de salir."); return; }
     S.sesion = null; guardar("sesion", null); ir("inicio");
@@ -867,7 +869,7 @@ $("#back").onclick = () => {
   }
   if (S.tab === "ruta" && v.cliente) return ir("ruta");
   if (S.tab === "recibir" && (v.factura || v.lista)) return ir("recibir");
-  if (S.tab === "stock" && (v.mov || v.conteo)) return ir("stock", { socio: v.socio });
+  if (S.tab === "stock" && (v.mov || v.conteo || v.asignar)) return ir("stock", { socio: v.socio });
   ir("inicio");
 };
 $("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };

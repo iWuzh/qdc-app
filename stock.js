@@ -46,6 +46,7 @@ function stock() {
   const v = S.vista;
   if (v.mov) return stockMovimiento();
   if (v.conteo) return stockConteo();
+  if (v.asignar) return stockAsignar();
   header("Stock", S.stock && S.stock.activo ? "Desde el conteo del " + fecha(S.stock.inicio) : "", false);
   if (!S.stock) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando stock…" : "Hace falta señal una vez para bajar el stock."}</div>`; return; }
   if (!S.stock.activo) { $("#screen").innerHTML = `<div class="hint">El stock con responsable arranca con el conteo físico inicial. Todavía no está anotado.</div>`; return; }
@@ -53,6 +54,7 @@ function stock() {
   const s = socioStock(v.socio), its = itemsDe(v.socio), esMio = norm(v.socio) === norm(miSocio());
   const conAlgo = stockSocios().filter(x => itemsDe(x.socio).length || norm(x.socio) === norm(miSocio()));
   $("#screen").innerHTML = `
+    ${avisoSinResponsable()}
     <div class="chips">${conAlgo.map(x => `<button class="chip" data-soc="${esc(x.socio)}" aria-pressed="${x.socio === v.socio}">${esc(x.socio)}${norm(x.socio) === norm(miSocio()) ? " (tú)" : ""}</button>`).join("")}</div>
     <div class="card">
       <div class="k" style="font-weight:700">${esMio ? "Lo que tienes" : "Lo que tiene " + esc(v.socio)}${s.conteo ? ` <span class="hint">· contado el ${fecha(s.conteo)}</span>` : ""}</div>
@@ -65,6 +67,7 @@ function stock() {
     ${s.movimientos && s.movimientos.length ? `<div class="label">Desde el último conteo</div>
       <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió / se lo quedó" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
   $$("[data-soc]").forEach(b => b.onclick = () => ir("stock", { socio: b.dataset.soc }));
+  cablearSinResponsable();
   $$("[data-mov]").forEach(b => b.onclick = () => ir("stock", { socio: v.socio, mov: b.dataset.mov, lineas: [] }));
   $("#contar").onclick = () => ir("stock", { socio: v.socio, conteo: true });
 }
@@ -165,6 +168,35 @@ function stockConteo() {
     encolar({ tipo: "conteo", socio: v.socio, items, explicaciones });
     toast(`✅ Conteo de ${v.socio} guardado`);
     ir("stock", { socio: v.socio });
+  };
+}
+
+// ---------- Bolas sin responsable (cierre de la semana) ----------
+// Recibidas − entregadas − dadas a socios. Lo del jueves va sin lista de
+// compras, por eso el control es al cerrar la semana. Se asigna a quien las
+// tiene y entran a su stock (servidor: stockBolasSinResponsable).
+function avisoSinResponsable() {
+  const sr = S.stock && S.stock.sinResponsable;
+  if (!sr) return "";
+  return `<button class="banner bad" id="sinResp" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ Quedaron <b>${cantTxt2(sr.sobran)} bolas</b> de la semana del ${fecha(sr.semana)} sin responsable (${cantTxt2(sr.recibidas)} recibidas, ${cantTxt2(sr.entregadas)} entregadas, ${cantTxt2(sr.aSocios)} a socios). ¿Quién las tiene? ›</button>`;
+}
+function cablearSinResponsable() { const b = $("#sinResp"); if (b) b.onclick = () => ir("stock", { asignar: true }); }
+function stockAsignar() {
+  const v = S.vista, sr = S.stock && S.stock.sinResponsable;
+  header("¿Quién las tiene?", sr ? `${cantTxt2(sr.sobran)} bolas · semana del ${fecha(sr.semana)}` : "", true);
+  if (!sr) { $("#screen").innerHTML = `<div class="hint">No hay bolas sin responsable. ✅</div>`; return; }
+  v.quien = v.quien || miSocio();
+  $("#screen").innerHTML = `
+    <div class="hint">En la semana entraron ${cantTxt2(sr.recibidas)} bolas, se entregaron ${cantTxt2(sr.entregadas)} a clientes y ${cantTxt2(sr.aSocios)} a socios. Las ${cantTxt2(sr.sobran)} que faltan están en la mano de alguien: pasan a su stock y responde por ellas.</div>
+    <div class="chips">${stockSocios().map(x => `<button class="chip" data-quien="${esc(x.socio)}" aria-pressed="${v.quien === x.socio}">${esc(x.socio)}</button>`).join("")}</div>
+    <div class="hint">Si en realidad se entregaron y no se anotó, anota esas entregas y el aviso baja solo.</div>
+    <div class="btns"><button class="go" id="asigOk" ${v.quien ? "" : "disabled"}>Las tiene ${esc(v.quien || "…")}</button></div>`;
+  $$("[data-quien]").forEach(b => b.onclick = () => { v.quien = b.dataset.quien; stockAsignar(); });
+  $("#asigOk").onclick = () => {
+    encolar({ tipo: "stock", movimiento: "entrada", socio: v.quien, nota: sr.nota, items: [{ producto: "Bolas de queso", presentacion: "", sabor: "", cantidad: sr.sobran }] });
+    S.stock.sinResponsable = null; guardar("stock", S.stock);
+    toast(`✅ ${cantTxt2(sr.sobran)} bolas al stock de ${v.quien}`);
+    ir("stock", { socio: v.quien });
   };
 }
 
