@@ -529,6 +529,7 @@ function entrega() {
 function recibir() {
   const v = S.vista;
   if (v.factura) return factura();
+  if (v.corr) return corrPedido();
   if (v.lista) return listaCompras();
   if (!S.catalogo) { header("Recibir", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
   if (!v.lineas) precargarRecibir(v, v.modoInicial || "todo");
@@ -606,7 +607,7 @@ function listaCompras() {
     ${(l.quien || []).length ? `<button class="go alt" id="verQuien">👤 ${S.vista.verQuien ? "Ocultar quién tomó cada pedido" : "¿Quién tomó cada pedido?"}</button>
     ${S.vista.verQuien ? l.quien.map(s => `<div class="card">
       <div class="line"><b>${esc(s.socio)}</b><span class="hint">${s.clientes.length} cliente${s.clientes.length === 1 ? "" : "s"}</span></div>
-      ${s.clientes.map(c => `<div style="margin-top:4px"><div style="font-weight:700">${esc(c.cliente)}</div>
+      ${s.clientes.map(c => `<div style="margin-top:4px"><div class="line" style="align-items:center"><b>${esc(c.cliente)}</b>${c.filas ? `<button class="chip sm" data-corr="${esc(c.cliente)}">✏️ Corregir</button>` : ""}</div>
         ${c.items.map(it => `<div class="line hint"><span>${esc(pdfNombre(it.d))}</span><span>${Number.isInteger(it.q) ? it.q : Math.round(it.q * 100) / 100}</span></div>`).join("")}</div>`).join("")}
     </div>`).join("") : ""}` : ""}`
     : `<div class="row">Todavía no hay pedidos esta semana.</div>`}`;
@@ -614,6 +615,7 @@ function listaCompras() {
     try { await navigator.clipboard.writeText(texto); toast("✅ Copiada: pégala en WhatsApp"); }
     catch (e) { toast("No se pudo copiar. Usa Compartir."); }
   };
+  $$("[data-corr]").forEach(b => b.onclick = () => ir("recibir", { corr: b.dataset.corr }));
   const vq = $("#verQuien"); if (vq) vq.onclick = () => { S.vista.verQuien = !S.vista.verQuien; listaCompras(); };
   const sh = $("#compartirLista"); if (sh) sh.onclick = async () => {
     if (navigator.share) { try { await navigator.share({ text: texto }); } catch (e) { /* canceló */ } }
@@ -869,7 +871,9 @@ function ctaDet() {
       <div class="label">Se aplicó a</div>
       <div class="rows">${p.aplica.map(ap => `<div class="row"><div><div style="font-weight:700">${esc(ap.d.d.n)}</div><div class="s">total ${fmt(ap.d.total)}</div></div><div class="r">${fmt(ap.monto)}</div></div>`).join("") || `<div class="row">No había facturas abiertas.</div>`}</div>
       ${p.aFavor > 0.005 ? `<div class="hint">Quedaron ${fmt(p.aFavor)} a favor.</div>` : ""}
-      <div class="hint">Los pagos se aplican a la factura más vieja primero.</div>`;
+      <div class="hint">Los pagos se aplican a la factura más vieja primero.</div>
+      ${bloqueCorregirPago(p.p, cobrar)}`;
+    cablearCorregirPago(p.p, cobrar, ctaDet);
     return;
   }
   const d = a.D.find(x => x.i === v.doc);
@@ -898,6 +902,7 @@ $("#back").onclick = () => {
     return ir("cuentas", { lado: v.lado });
   }
   if (S.tab === "ruta" && v.cliente) return ir("ruta");
+  if (S.tab === "recibir" && v.corr) return ir("recibir", { lista: true, verQuien: true });
   if (S.tab === "recibir" && (v.factura || v.lista)) return ir("recibir");
   if (S.tab === "stock" && (v.mov || v.conteo || v.asignar)) return ir("stock", { socio: v.socio });
   ir("inicio");
