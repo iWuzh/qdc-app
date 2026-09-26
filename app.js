@@ -57,6 +57,10 @@ function encolar(reg) {
 
 // Refleja el registro en lo que se ve, sin esperar al servidor.
 function aplicarLocal(reg) {
+  // La caja se mueve al momento (sin esperar al servidor): cobro entra, pago y gasto salen.
+  if (S.cuentas && S.cuentas.caja && ["cobro", "pago", "gasto"].includes(reg.tipo)) {
+    S.cuentas.caja.efectivo += reg.tipo === "cobro" ? reg.monto : -reg.monto;
+  }
   if ((reg.tipo === "cobro") && S.cuentas) {
     const c = S.cuentas.cobrar.find(x => x.cliente === reg.cliente);
     if (c) { c.pagos.push({ fecha: hoyIso(), monto: reg.monto, por: S.sesion.nombre, local: true }); c.pagado += reg.monto; c.debe -= reg.monto; }
@@ -131,7 +135,7 @@ async function refrescar() {
     await Promise.all([
       pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); repintar(); } }),
       llamar({ accion: "ruta" }).then(ru => { if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); repintar(); } }),
-      llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); repintar(); } }),
+      llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar, caja: cu.caja }; guardar("cuentas", S.cuentas); repintar(); } }),
       llamar({ accion: "compras" }).then(co => { if (co.ok) { S.compras = co.compras; guardar("compras", S.compras); repintar(); } }),
       llamar({ accion: "stock" }).then(st => { if (st.ok) { S.stock = st.stock; guardar("stock", S.stock); repintar(); } })
     ]);
@@ -235,10 +239,13 @@ function inicio() {
     ${S.compras && S.compras.bolas ? `<button class="banner bad" id="bolasSinRec" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ Van <b>${S.compras.bolas.faltan}</b> bola${S.compras.bolas.faltan === 1 ? "" : "s"} entregada${S.compras.bolas.faltan === 1 ? "" : "s"} esta semana sin recepción anotada. ¿Falta anotar lo que llegó? Toca para recibir ›</button>` : ""}
     ${avisoSinResponsable()}
     ${avisos.length ? `<button class="banner" id="verAvisos" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ ${avisos.length} aviso${avisos.length > 1 ? "s" : ""} con el proveedor: ${esc(avisos[0])} ›</button>` : ""}
+    ${S.cuentas && S.cuentas.caja ? `<div class="stat"><div class="k">Caja (efectivo)</div><div class="v">${fmt(S.cuentas.caja.efectivo)}</div>
+      <div class="hint">Cobrado − pagado a proveedores − gastos. Lo mismo que <b>caja</b> en el bot.</div></div>` : ""}
     <div class="stats">
       <div class="stat"><div class="k">Nos deben</div><div class="v">${S.cuentas ? fmt(nosDeben) : "—"}</div></div>
       <div class="stat"><div class="k">Le debemos</div><div class="v">${S.cuentas ? fmt(debemos) : "—"}</div></div>
     </div>
+    ${S.cuentas && S.cuentas.caja ? `<div class="hint">Si todos nos pagan y pagamos lo que debemos: <b>${fmt(S.cuentas.caja.efectivo + nosDeben - debemos)}</b></div>` : ""}
     <div class="hint">${actualizadoTxt()}${window.QDC_CONFIG.AMBIENTE === "prueba" ? " · Ambiente de PRUEBA (copia del Sheet)" : ""}</div>
     <button class="add" id="salir">Salir (cambiar de persona)</button>`;
   $$("[data-go]").forEach(b => b.onclick = () => ir(b.dataset.go));
