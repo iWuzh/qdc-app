@@ -197,10 +197,11 @@ function repProductos(r) {
       ${repTile("Vendido (4 semanas)", repMonto(tot.v))}
       ${repTile("Margen (4 semanas)", repMonto(tot.m), `<div class="hint">${tot.v ? Math.round(100 * tot.m / tot.v) : 0}% de lo vendido</div>`)}
     </div>
-    <div class="hint">Desde el dom ${repSem(r.detalleDesde)}. Margen = lo vendido − lo que costó (precio de compra de hoy). Ordenado por lo que más se vende.</div>
+    <div class="hint">Desde el dom ${repSem(r.detalleDesde)}${r.semanasDetalle ? ` (${r.semanasDetalle} semanas)` : ""}. Arriba a la derecha: <b>cuánto se vende por semana</b> en promedio. Margen = lo vendido − lo que costó (precio de compra de hoy). Ordenado por lo que más se vende.</div>
     <div class="rows">${ps.map(p => `<div class="row" style="display:block">
-      <div class="line"><b>${esc(pdfNombre(p.producto))}</b><span>${repMonto(p.vendido)}</span></div>
-      <div class="line"><span class="hint">${Math.round(p.q * 100) / 100}${p.u ? " lb" : ""} · margen ${p.vendido ? Math.round(100 * p.margen / p.vendido) : 0}%</span><span style="${p.margen < 0 ? "color:var(--bad);font-weight:700" : ""}">${p.margen < 0 ? "Pérdida " : ""}${repMonto(p.margen)}</span></div>
+      <div class="line"><b>${esc(pdfNombre(p.producto))}</b>${p.porSemana != null ? `<b>${Math.round(p.porSemana * 10) / 10}${p.u ? " lb" : ""}<small class="hint" style="font-weight:400"> /sem</small></b>` : `<span>${repMonto(p.vendido)}</span>`}</div>
+      ${p.porSemana != null ? `<div class="line"><span class="hint">${repMonto(p.ventaSemana)} por semana</span><span class="hint">${repMonto(p.vendido)} en ${r.semanasDetalle} sem</span></div>` : ""}
+      <div class="line"><span class="hint">${Math.round(p.q * 100) / 100}${p.u ? " lb" : ""} en total · margen ${p.vendido ? Math.round(100 * p.margen / p.vendido) : 0}%</span><span style="${p.margen < 0 ? "color:var(--bad);font-weight:700" : ""}">${p.margen < 0 ? "Pérdida " : ""}${repMonto(p.margen)}</span></div>
       <div class="rep-marg"><span style="width:${Math.max(2, 100 * Math.abs(p.margen) / max)}%;background:${p.margen < 0 ? "var(--bad)" : REP_COLOR.ganancia}"></span></div>
       ${p.sinCosto ? `<div class="hint warn">Sin precio de compra para parte de esto: el margen sale de más.</div>` : ""}</div>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
 }
