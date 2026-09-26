@@ -168,12 +168,10 @@ function repSemanas(r) {
 function repCobros(r) {
   const c = r.cobranza, total = c.debe || 0;
   const semanas = c.porSemana.slice(0, -1);   // la semana en curso todavía no ha tenido tiempo de cobrarse
-  const delta = c.dias != null && c.diasPrevio != null
-    ? `<div class="hint" style="color:${c.dias <= c.diasPrevio ? "var(--ok)" : "var(--bad)"}">${c.dias <= c.diasPrevio ? "▼" : "▲"} ${Math.abs(c.dias - c.diasPrevio)} días vs. las 4 semanas anteriores</div>` : "";
   $("#repCuerpo").innerHTML = `
     <div class="stat"><div class="k">Tardamos en cobrar</div>
       <div class="v rep-hero">${c.dias == null ? "—" : c.dias}<small> ${c.dias === 1 ? "día" : "días"}</small></div>
-      ${delta}<div class="hint">Promedio desde que se entrega hasta que se termina de pagar (entregas de las últimas 4 semanas, pesado por monto).</div></div>
+      <div class="hint">Promedio desde el corte (${c.desde ? fecha(c.desde) : "todo el histórico"}): desde que se entrega hasta que se termina de pagar, pesado por monto.</div></div>
     <div class="card">
       <div class="k" style="font-weight:700">Lo que se debe hoy: ${repMonto(total)}</div>
       <div class="hint">Según cuánto tiempo lleva sin pagarse</div>
@@ -184,7 +182,7 @@ function repCobros(r) {
       ${repLineas("gDias", semanas.map(s => repSem(s.semana)), [{ nombre: "Días para cobrar", color: REP_COLOR.vendido, valores: semanas.map(s => s.dias) }], n => String(Math.round(n)))}</div>` : ""}
     <div class="label">Quién debe (lo más viejo primero)</div>
     <div class="rows">${c.deudores.map(d => `<button class="row" data-cli="${esc(d.cliente)}"><div><div style="font-weight:700">${esc(d.cliente)}</div>
-      <div class="s">${d.dias == null ? "todavía no ha pagado nada desde el corte" : `tarda ${d.dias} día${d.dias === 1 ? "" : "s"} en pagar`}${d.vencido > 0.5 ? ` · <span style="color:var(--bad);font-weight:700">⚠️ ${repMonto(d.vencido)} con más de 14 días</span>` : ""}</div></div>
+      <div class="s"><b>${total ? Math.round(100 * d.debe / total) : 0}%</b> de lo que nos deben · ${d.dias == null ? "no ha pagado nada desde el corte" : `tarda ${d.dias} día${d.dias === 1 ? "" : "s"} en pagar`}${d.vencido > 0.5 ? ` · <span style="color:var(--bad);font-weight:700">⚠️ ${repMonto(d.vencido)} con más de 14 días</span>` : ""}</div></div>
       <div class="r">${repMonto(d.debe)} ›</div></button>`).join("") || `<div class="row">Nadie debe nada 🎉</div>`}</div>
     <div class="hint">Cuenta desde el punto de partida (${c.desde ? fecha(c.desde) : "todo el histórico"}); antes de esa fecha todo está en cero. Los pagos se aplican a la entrega más vieja.</div>`;
   $$("[data-cli]").forEach(b => b.onclick = () => ir("cuentas", { lado: "cobrar", quien: b.dataset.cli, nivel: "deuda" }));
