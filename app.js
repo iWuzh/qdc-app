@@ -26,7 +26,8 @@ const S = {
   ruta: leer("ruta", null),
   cuentas: leer("cuentas", null),
   compras: leer("compras", null),
-  reportes: leer("reportes", null),      // se bajan al abrir la pestaña (tardan unos segundos)
+  reportes: leer("reportes", null),
+  stock: leer("stock", null),            // stock con responsable (Fase 3)      // se bajan al abrir la pestaña (tardan unos segundos)
   reportesHora: leer("reportesHora", null),        // lo pedido al proveedor, para precargar Recibir
   cola: leer("cola", []),                // registros sin enviar
   errores: leer("errores", []),          // registros que el servidor rechazó
@@ -84,6 +85,12 @@ function aplicarLocal(reg) {
       guardar("compras", S.compras);
     }
   }
+  if (reg.tipo === "stock" && S.stock) moverLocal(reg.socio, reg.items, reg.movimiento === "entrada" ? 1 : -1);
+  if (reg.desdeStock && S.stock) moverLocal(reg.desdeStock, (reg.items || []).map(i => Object.assign({}, i, { cantidad: i.libras != null ? i.libras : i.cantidad })), -1);
+  if (reg.tipo === "conteo" && S.stock) {
+    const s = socioStock(reg.socio);
+    if (s) { s.items = reg.items.map(i => ({ producto: i.producto, variante: i.presentacion || "", sabor: i.sabor || "", u: "", cantidad: i.cantidad })); s.conteo = hoyIso(); s.movimientos = []; guardar("stock", S.stock); }
+  }
   if (reg.tipo === "entrega" && S.ruta) {
     const c = S.ruta.clientes.find(x => x.cliente === reg.cliente);
     if (c) c.entregado = true;
@@ -125,7 +132,8 @@ async function refrescar() {
       pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); repintar(); } }),
       llamar({ accion: "ruta" }).then(ru => { if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); repintar(); } }),
       llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar }; guardar("cuentas", S.cuentas); repintar(); } }),
-      llamar({ accion: "compras" }).then(co => { if (co.ok) { S.compras = co.compras; guardar("compras", S.compras); repintar(); } })
+      llamar({ accion: "compras" }).then(co => { if (co.ok) { S.compras = co.compras; guardar("compras", S.compras); repintar(); } }),
+      llamar({ accion: "stock" }).then(st => { if (st.ok) { S.stock = st.stock; guardar("stock", S.stock); repintar(); } })
     ]);
     S.actualizado = new Date().toISOString(); guardar("actualizado", S.actualizado);
     S.enLinea = true;
@@ -157,7 +165,7 @@ function pintar() {
   $("#tabs").hidden = !S.sesion;
   $$("#tabs button").forEach(b => b.dataset.tab === S.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   if (!S.sesion || S.sesion.pinVencido) { $("#tabs").hidden = true; return login(); }
-  ({ inicio, pedido, ruta, recibir, cuentas, reportes })[S.tab]();
+  ({ inicio, pedido, ruta, recibir, cuentas, reportes, stock })[S.tab]();
 }
 
 // ---------- Login ----------
@@ -301,6 +309,8 @@ function describir(r) {
   if (r.tipo === "pago") return `Pago a ${r.proveedor} · ${fmt(r.monto)}`;
   if (r.tipo === "gasto") return `Gasto ${r.descripcion} · ${fmt(r.monto)}`;
   if (r.tipo === "factura") return `Factura de ${r.proveedor} (semana del ${fecha(r.semana)}) · ${fmt(r.monto)}`;
+  if (r.tipo === "stock") return `${(MOV[r.movimiento] || {}).t || r.movimiento} · ${r.socio}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
+  if (r.tipo === "conteo") return `Conteo de ${r.socio}`;
   if (r.tipo === "recepcion") return "Recibido: " + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
   return `${{ pedido: "Pedido", venta: "Venta", entrega: "Entrega" }[r.tipo]} de ${r.cliente}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
 }
@@ -415,25 +425,28 @@ function pedido() {
     ${sel.html}
     ${faltaPeso ? `<div class="hint">⚖️ Los quesos por libra sin peso no entran en el total. Para <b>Entregar pedido</b> hace falta el peso.</div>` : ""}
     <div class="hint">El total es una guía: el precio final lo pone el servidor (incluye precios especiales por cliente).</div>
+    ${hay && quien ? bloqueDesde(v) : ""}
     <div class="confirm">
       <div class="tot"><span class="k">Total estimado</span><span class="v">${fmt(total)}</span></div>
       <div class="btns">
         <button class="go alt" id="guardar" ${hay && quien ? "" : "disabled"}>Guardar pedido</button>
-        <button class="go" id="entregar" ${hay && quien && !faltaPeso ? "" : "disabled"}>${faltaPeso && hay ? "Falta el peso" : "Entregar pedido"}</button>
+        <button class="go" id="entregar" ${hay && quien && !faltaPeso && !(v.desde && faltaEnStock(v)) ? "" : "disabled"}>${faltaPeso && hay ? "Falta el peso" : "Entregar pedido"}</button>
       </div>
     </div>`;
   $$("[data-c]").forEach(b => b.onclick = () => { v.cliente = b.dataset.c; v.otro = false; pedido(); });
   $("#otro").onclick = () => { v.otro = true; v.cliente = null; pedido(); setTimeout(() => $("#ref") && $("#ref").focus(), 0); };
   const ref = $("#ref"); if (ref) ref.oninput = e => { v.ref = e.target.value; conFoco(pedido); };
   cablearSelector(v, sel.filas, pedido, false);
+  cablearDesde(v, pedido);
   const fin = tipo => {
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const it = { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: num(l.cantidad) };
       if (prodCat(l.producto) && prodCat(l.producto).porLibra && num(l.libras) > 0) it.libras = num(l.libras);
       return it;
     });
-    encolar({ tipo, cliente: quien, items });
-    toast(tipo === "venta" ? `✅ Entregado a ${quien}` : `✅ Pedido de ${quien} guardado`);
+    // "Guardar pedido" no saca nada del stock: solo la entrega al momento.
+    encolar(Object.assign({ tipo, cliente: quien, items }, tipo === "venta" && v.desde ? { desdeStock: v.desde } : {}));
+    toast(tipo === "venta" ? `✅ Entregado a ${quien}${v.desde ? " (del stock de " + v.desde + ")" : ""}` : `✅ Pedido de ${quien} guardado`);
     ir("inicio");
   };
   $("#guardar").onclick = () => fin("pedido");
@@ -480,19 +493,21 @@ function entrega() {
     <div class="hint">Lo que pidió ya viene cargado ("pidió N"). Cambia cantidades con ➖/➕ o escribiéndolas, y agrega lo que no pidió.</div>
     ${sel.html}
     ${faltaPeso ? `<div class="hint warn">⚖️ Escribe las libras que marcó la balanza. El precio sale del peso, no de las barras.</div>` : ""}
+    ${hay ? bloqueDesde(v) : ""}
     <div class="confirm">
       <div class="tot"><span class="k">Factura estimada</span><span class="v">${fmt(total)}</span></div>
-      <div class="btns"><button class="go" id="conf" ${hay && !faltaPeso ? "" : "disabled"}>${faltaPeso ? "Falta el peso" : "Confirmar entrega"}</button></div>
+      <div class="btns"><button class="go" id="conf" ${hay && !faltaPeso && !(v.desde && faltaEnStock(v)) ? "" : "disabled"}>${faltaPeso ? "Falta el peso" : "Confirmar entrega"}</button></div>
     </div>`;
   cablearSelector(v, sel.filas, entrega, true);
+  cablearDesde(v, entrega);
   $("#conf").onclick = () => {
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const p = prodCat(l.producto);
       // En la entrega, un queso por libra se registra por las LIBRAS (así cobra el bot).
       return { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: p && p.porLibra ? num(l.libras) : num(l.cantidad) };
     });
-    encolar({ tipo: "entrega", cliente: v.cliente, items });
-    toast(`✅ Entrega de ${v.cliente} guardada`);
+    encolar(Object.assign({ tipo: "entrega", cliente: v.cliente, items }, v.desde ? { desdeStock: v.desde } : {}));
+    toast(`✅ Entrega de ${v.cliente} guardada${v.desde ? " (del stock de " + v.desde + ")" : ""}`);
     ir("ruta");
   };
 }
@@ -852,6 +867,7 @@ $("#back").onclick = () => {
   }
   if (S.tab === "ruta" && v.cliente) return ir("ruta");
   if (S.tab === "recibir" && (v.factura || v.lista)) return ir("recibir");
+  if (S.tab === "stock" && (v.mov || v.conteo)) return ir("stock", { socio: v.socio });
   ir("inicio");
 };
 $("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };
