@@ -219,26 +219,37 @@ function repVolumenClientes() {
     return { cliente: c.cliente, tot, prom: tot / semanas };
   }).filter(x => x.tot > 0.5).sort((a, b) => b.prom - a.prom);
 }
+// Distribución (en la lista de Clientes) va uno por uno: los 6 más grandes +
+// "Otros". Los de Contado (no están en la lista: "+ Otro", de paso) van juntos
+// en "Al contado". Tocar un grupo enseña solo a los suyos.
 function repBarrasClientes(v) {
   const todos = repVolumenClientes();
   if (!todos.length) return "";
-  const resto = todos.slice(REP_TOP);
+  const lista = new Set(((S.catalogo && S.catalogo.clientes) || []).map(norm));
+  const dist = todos.filter(x => lista.has(norm(x.cliente))), contado = todos.filter(x => !lista.has(norm(x.cliente)));
+  const grupos = { otros: dist.slice(REP_TOP), contado };
+  const suma = xs => xs.reduce((a, x) => a + x.prom, 0);
+  const g = v.grupo && grupos[v.grupo] && grupos[v.grupo].length ? v.grupo : "";
   let filas;
-  if (v.otros && resto.length) filas = resto.map(x => ({ n: x.cliente, prom: x.prom }));
+  if (g) filas = grupos[g].map(x => ({ n: x.cliente, prom: x.prom }));
   else {
-    filas = todos.slice(0, REP_TOP).map(x => ({ n: x.cliente, prom: x.prom }));
-    if (resto.length) filas.push({ n: "Otros", prom: resto.reduce((a, x) => a + x.prom, 0), otros: resto.length });
+    filas = dist.slice(0, REP_TOP).map(x => ({ n: x.cliente, prom: x.prom }));
+    if (grupos.otros.length) filas.push({ n: "Otros", prom: suma(grupos.otros), grupo: "otros", cuantos: grupos.otros.length });
+    if (contado.length) filas.push({ n: "Al contado", prom: suma(contado), grupo: "contado", cuantos: contado.length });
   }
   const max = Math.max(...filas.map(f => f.prom), 1);
-  const total = todos.reduce((a, x) => a + x.prom, 0);
+  const total = suma(todos);
+  const titulo = { otros: `Otros de Distribución (${grupos.otros.length})`, contado: `Clientes al contado (${contado.length})` }[g] || "Venta promedio por semana";
+  const nota = { otros: "Los de la lista de clientes que no están entre los 6 más grandes.", contado: "Los que no están en la lista de clientes (pagan Contado)." }[g]
+    || "Toca \"Otros\" o \"Al contado\" para verlos por separado.";
   return `<div class="card">
-    <div class="k" style="font-weight:700">${v.otros ? `Otros (${resto.length} clientes)` : "Venta promedio por semana"}</div>
-    <div class="hint">Desde el corte. ${v.otros ? "Solo los que no están entre los 6 más grandes." : "Toca \"Otros\" para verlos por separado."}</div>
-    ${v.otros ? `<button class="chip sm" id="repTodos" style="align-self:flex-start">‹ Todos los clientes</button>` : ""}
+    <div class="k" style="font-weight:700">${titulo}</div>
+    <div class="hint">Desde el corte. ${nota}</div>
+    ${g ? `<button class="chip sm" id="repTodos" style="align-self:flex-start">‹ Todos los clientes</button>` : ""}
     <div class="rep-barras">${filas.map(f => `
-      <button class="rep-bar" ${f.otros ? `id="repOtros"` : `data-cli="${esc(f.n)}"`} title="${esc(f.n)}: ${repMonto(f.prom)} por semana">
-        <span class="rep-bar-n">${f.otros ? `<u>Otros</u> <small>(${f.otros})</small>` : esc(f.n)}</span>
-        <span class="rep-bar-t"><i style="width:${Math.max(1.5, 100 * f.prom / max)}%;background:${f.otros ? "var(--ink-2)" : REP_COLOR.vendido}"></i></span>
+      <button class="rep-bar" ${f.grupo ? `data-grupo="${f.grupo}"` : `data-cli="${esc(f.n)}"`} title="${esc(f.n)}: ${repMonto(f.prom)} por semana">
+        <span class="rep-bar-n">${f.grupo ? `<u>${f.n}</u> <small>(${f.cuantos})</small>` : esc(f.n)}</span>
+        <span class="rep-bar-t"><i style="width:${Math.max(1.5, 100 * f.prom / max)}%;background:${f.grupo ? "var(--ink-2)" : REP_COLOR.vendido}"></i></span>
         <span class="rep-bar-v">${repMonto(f.prom)}<small> · ${Math.round(100 * f.prom / total)}%</small></span>
       </button>`).join("")}</div>
   </div>`;
@@ -255,6 +266,6 @@ function repClientes(r) {
         <span class="hint">${c.debe > 0.5 ? "debe " + repMonto(c.debe) : "al día"}${c.dias != null ? " · tarda " + c.dias + "d" : ""}</span></div>
       ${c.vencido > 0.5 ? `<div class="hint bad">⚠️ ${repMonto(c.vencido)} con más de 14 días</div>` : ""}</button>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
   $$("[data-cli]").forEach(b => b.onclick = () => ir("cuentas", { lado: "cobrar", quien: b.dataset.cli, nivel: "hist" }));
-  const ot = $("#repOtros"); if (ot) ot.onclick = () => { v.otros = true; reportes(); };
-  const td = $("#repTodos"); if (td) td.onclick = () => { v.otros = false; reportes(); };
+  $$("[data-grupo]").forEach(b => b.onclick = () => { v.grupo = b.dataset.grupo; reportes(); });
+  const td = $("#repTodos"); if (td) td.onclick = () => { v.grupo = ""; reportes(); };
 }
