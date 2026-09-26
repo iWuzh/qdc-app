@@ -130,3 +130,11 @@ input.qty{width:56px;height:40px;border-radius:11px;border:1.5px solid var(--lin
 .rep-sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:8px;vertical-align:middle}
 .rep-marg{height:6px;background:var(--surface);border-radius:3px;margin-top:6px}
 .rep-marg span{display:block;height:6px;border-radius:0 3px 3px 0}
+.rep-barras{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.rep-bar{display:grid;grid-template-columns:minmax(70px,30%) 1fr auto;align-items:center;gap:10px;border:0;background:none;padding:7px 0;text-align:left;cursor:pointer;font-size:14px}
+.rep-bar:hover .rep-bar-t i,.rep-bar:focus-visible .rep-bar-t i{filter:brightness(1.15)}
+.rep-bar-n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rep-bar-n small,.rep-bar-v small{color:var(--ink-2);font-weight:400}
+.rep-bar-t{height:18px;display:flex;align-items:center}
+.rep-bar-t i{display:block;height:18px;border-radius:0 4px 4px 0}
+.rep-bar-v{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}

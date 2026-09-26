@@ -205,9 +205,49 @@ function repProductos(r) {
       ${p.sinCosto ? `<div class="hint warn">Sin precio de compra para parte de esto: el margen sale de más.</div>` : ""}</div>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
 }
 
+// ---------- Gráfico de clientes: venta promedio por semana desde el corte ----------
+// Los 6 más grandes + "Otros" (el resto junto). Tocar "Otros" enseña solo a
+// esos; tocar un cliente abre su cuenta. Mismos números que "Clientes al día"
+// (Cuentas): total entregado desde el corte ÷ todas las semanas desde el corte.
+const REP_TOP = 6;
+function repVolumenClientes() {
+  if (!S.cuentas) return [];
+  const corte = (S.reportes && S.reportes.cobranza && S.reportes.cobranza.desde) || "2026-08-30";
+  const semanas = Math.max(1, Math.ceil((Date.now() - new Date(corte + "T00:00:00")) / (7 * 864e5)));
+  return S.cuentas.cobrar.map(c => {
+    const tot = c.docs.filter(d => d.fecha >= corte).reduce((a, d) => a + d.items.reduce((s, it) => s + it.total, 0), 0);
+    return { cliente: c.cliente, tot, prom: tot / semanas };
+  }).filter(x => x.tot > 0.5).sort((a, b) => b.prom - a.prom);
+}
+function repBarrasClientes(v) {
+  const todos = repVolumenClientes();
+  if (!todos.length) return "";
+  const resto = todos.slice(REP_TOP);
+  let filas;
+  if (v.otros && resto.length) filas = resto.map(x => ({ n: x.cliente, prom: x.prom }));
+  else {
+    filas = todos.slice(0, REP_TOP).map(x => ({ n: x.cliente, prom: x.prom }));
+    if (resto.length) filas.push({ n: "Otros", prom: resto.reduce((a, x) => a + x.prom, 0), otros: resto.length });
+  }
+  const max = Math.max(...filas.map(f => f.prom), 1);
+  const total = todos.reduce((a, x) => a + x.prom, 0);
+  return `<div class="card">
+    <div class="k" style="font-weight:700">${v.otros ? `Otros (${resto.length} clientes)` : "Venta promedio por semana"}</div>
+    <div class="hint">Desde el corte. ${v.otros ? "Solo los que no están entre los 6 más grandes." : "Toca \"Otros\" para verlos por separado."}</div>
+    ${v.otros ? `<button class="chip sm" id="repTodos" style="align-self:flex-start">‹ Todos los clientes</button>` : ""}
+    <div class="rep-barras">${filas.map(f => `
+      <button class="rep-bar" ${f.otros ? `id="repOtros"` : `data-cli="${esc(f.n)}"`} title="${esc(f.n)}: ${repMonto(f.prom)} por semana">
+        <span class="rep-bar-n">${f.otros ? `<u>Otros</u> <small>(${f.otros})</small>` : esc(f.n)}</span>
+        <span class="rep-bar-t"><i style="width:${Math.max(1.5, 100 * f.prom / max)}%;background:${f.otros ? "var(--ink-2)" : REP_COLOR.vendido}"></i></span>
+        <span class="rep-bar-v">${repMonto(f.prom)}<small> · ${Math.round(100 * f.prom / total)}%</small></span>
+      </button>`).join("")}</div>
+  </div>`;
+}
+
 function repClientes(r) {
-  const cs = r.clientes;
+  const cs = r.clientes, v = S.vista;
   $("#repCuerpo").innerHTML = `
+    ${repBarrasClientes(v)}
     <div class="hint">Últimas 4 semanas (desde el dom ${repSem(r.detalleDesde)}), ordenado por lo que más compra. "Tarda" = días promedio para pagar.</div>
     <div class="rows">${cs.map(c => `<button class="row" data-cli="${esc(c.cliente)}" style="display:block;text-align:left">
       <div class="line"><b>${esc(c.cliente)}</b><span>${repMonto(c.vendido)}</span></div>
@@ -215,4 +255,6 @@ function repClientes(r) {
         <span class="hint">${c.debe > 0.5 ? "debe " + repMonto(c.debe) : "al día"}${c.dias != null ? " · tarda " + c.dias + "d" : ""}</span></div>
       ${c.vencido > 0.5 ? `<div class="hint bad">⚠️ ${repMonto(c.vencido)} con más de 14 días</div>` : ""}</button>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
   $$("[data-cli]").forEach(b => b.onclick = () => ir("cuentas", { lado: "cobrar", quien: b.dataset.cli, nivel: "hist" }));
+  const ot = $("#repOtros"); if (ot) ot.onclick = () => { v.otros = true; reportes(); };
+  const td = $("#repTodos"); if (td) td.onclick = () => { v.otros = false; reportes(); };
 }
