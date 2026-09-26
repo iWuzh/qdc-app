@@ -25,7 +25,9 @@ const S = {
   catalogo: leer("catalogo", null),
   ruta: leer("ruta", null),
   cuentas: leer("cuentas", null),
-  compras: leer("compras", null),        // lo pedido al proveedor, para precargar Recibir
+  compras: leer("compras", null),
+  reportes: leer("reportes", null),      // se bajan al abrir la pestaña (tardan unos segundos)
+  reportesHora: leer("reportesHora", null),        // lo pedido al proveedor, para precargar Recibir
   cola: leer("cola", []),                // registros sin enviar
   errores: leer("errores", []),          // registros que el servidor rechazó
   actualizado: leer("actualizado", null),
@@ -155,7 +157,7 @@ function pintar() {
   $("#tabs").hidden = !S.sesion;
   $$("#tabs button").forEach(b => b.dataset.tab === S.tab ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
   if (!S.sesion || S.sesion.pinVencido) { $("#tabs").hidden = true; return login(); }
-  ({ inicio, pedido, ruta, recibir, cuentas })[S.tab]();
+  ({ inicio, pedido, ruta, recibir, cuentas, reportes })[S.tab]();
 }
 
 // ---------- Login ----------
