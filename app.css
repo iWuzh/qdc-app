@@ -138,3 +138,6 @@ input.qty{width:56px;height:40px;border-radius:11px;border:1.5px solid var(--lin
 .rep-bar-t{height:18px;display:flex;align-items:center}
 .rep-bar-t i{display:block;height:18px;border-radius:0 4px 4px 0}
 .rep-bar-v{font-variant-numeric:tabular-nums;font-weight:700;white-space:nowrap}
+.rep-grupo summary::-webkit-details-marker{display:none}
+.rep-hijos{margin-top:10px;padding-left:12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:12px}
+.rep-hijo .line b{font-size:14px}

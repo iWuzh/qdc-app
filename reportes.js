@@ -189,21 +189,55 @@ function repCobros(r) {
   repCablearLineas("gDias", n => n + " días");
 }
 
+// Productos agrupados (pedido de Marcos, 26 sep): el yogur en LITROS y cada
+// queso en barra en LIBRAS, con desplegable por presentación. Bolas y
+// mantequilla quedan solas. Medidas de EE. UU. para el yogur.
+const REP_LITROS = { "10oz": 0.2957, "litro": 1, "medio galon": 1.8927, "galon": 3.7854 };
+function repAgruparProductos(ps) {
+  const grupos = {}, orden = [];
+  for (const p of ps) {
+    const [base, pres] = p.producto.split(" · ");
+    const k = norm(base);
+    if (!grupos[k]) { grupos[k] = { base, hijos: [], vendido: 0, margen: 0, ventaSemana: 0, cant: 0, porSemana: 0, unidad: "", sinCosto: false }; orden.push(k); }
+    const g = grupos[k];
+    g.hijos.push(Object.assign({ pres: pres || "" }, p));
+    g.vendido += p.vendido; g.margen += p.margen; g.ventaSemana += p.ventaSemana || 0; g.sinCosto = g.sinCosto || p.sinCosto;
+    if (k === "yogur") {
+      const l = REP_LITROS[norm(pres)] || 0;
+      g.cant += p.q * l; g.porSemana += (p.porSemana || 0) * l; g.unidad = "L";
+    } else if (p.u === "lb") { g.cant += p.q; g.porSemana += p.porSemana || 0; g.unidad = "lb"; }
+    else { g.cant += p.q; g.porSemana += p.porSemana || 0; }
+  }
+  return orden.map(k => grupos[k]).sort((a, b) => b.vendido - a.vendido);
+}
+
+function repFilaProducto(p, r, max, titulo, unidad) {
+  const u = unidad === "L" ? " L" : unidad === "lb" || p.u === "lb" ? " lb" : "";
+  return `<div class="line"><b>${titulo}</b><b>${Math.round((p.porSemana || 0) * 10) / 10}${u}<small class="hint" style="font-weight:400"> /sem</small></b></div>
+      <div class="line"><span class="hint">${repMonto(p.ventaSemana || 0)} por semana</span><span class="hint">${repMonto(p.vendido)} en ${r.semanasDetalle} sem</span></div>
+      <div class="line"><span class="hint">${Math.round((p.cant != null ? p.cant : p.q) * 10) / 10}${u} en total · margen ${p.vendido ? Math.round(100 * p.margen / p.vendido) : 0}%</span><span style="${p.margen < 0 ? "color:var(--bad);font-weight:700" : ""}">${p.margen < 0 ? "Pérdida " : ""}${repMonto(p.margen)}</span></div>
+      <div class="rep-marg"><span style="width:${Math.max(2, 100 * Math.abs(p.margen) / max)}%;background:${p.margen < 0 ? "var(--bad)" : REP_COLOR.ganancia}"></span></div>
+      ${p.sinCosto ? `<div class="hint warn">Sin precio de compra para parte de esto: el margen sale de más.</div>` : ""}`;
+}
+
 function repProductos(r) {
-  const ps = r.productos, max = Math.max(1, ...ps.map(p => Math.abs(p.margen)));
-  const tot = ps.reduce((a, p) => ({ v: a.v + p.vendido, m: a.m + p.margen }), { v: 0, m: 0 });
+  const gs = repAgruparProductos(r.productos);
+  const max = Math.max(1, ...gs.map(g => Math.abs(g.margen)));
+  const tot = gs.reduce((a, g) => ({ v: a.v + g.vendido, m: a.m + g.margen }), { v: 0, m: 0 });
+  S.vista.abiertos = S.vista.abiertos || {};
   $("#repCuerpo").innerHTML = `
     <div class="stats">
-      ${repTile("Vendido (4 semanas)", repMonto(tot.v))}
-      ${repTile("Margen (4 semanas)", repMonto(tot.m), `<div class="hint">${tot.v ? Math.round(100 * tot.m / tot.v) : 0}% de lo vendido</div>`)}
+      ${repTile("Vendido (" + (r.semanasDetalle || 4) + " semanas)", repMonto(tot.v))}
+      ${repTile("Margen", repMonto(tot.m), `<div class="hint">${tot.v ? Math.round(100 * tot.m / tot.v) : 0}% de lo vendido</div>`)}
     </div>
-    <div class="hint">Desde el dom ${repSem(r.detalleDesde)}${r.semanasDetalle ? ` (${r.semanasDetalle} semanas)` : ""}. Arriba a la derecha: <b>cuánto se vende por semana</b> en promedio. Margen = lo vendido − lo que costó (precio de compra de hoy). Ordenado por lo que más se vende.</div>
-    <div class="rows">${ps.map(p => `<div class="row" style="display:block">
-      <div class="line"><b>${esc(pdfNombre(p.producto))}</b>${p.porSemana != null ? `<b>${Math.round(p.porSemana * 10) / 10}${p.u ? " lb" : ""}<small class="hint" style="font-weight:400"> /sem</small></b>` : `<span>${repMonto(p.vendido)}</span>`}</div>
-      ${p.porSemana != null ? `<div class="line"><span class="hint">${repMonto(p.ventaSemana)} por semana</span><span class="hint">${repMonto(p.vendido)} en ${r.semanasDetalle} sem</span></div>` : ""}
-      <div class="line"><span class="hint">${Math.round(p.q * 100) / 100}${p.u ? " lb" : ""} en total · margen ${p.vendido ? Math.round(100 * p.margen / p.vendido) : 0}%</span><span style="${p.margen < 0 ? "color:var(--bad);font-weight:700" : ""}">${p.margen < 0 ? "Pérdida " : ""}${repMonto(p.margen)}</span></div>
-      <div class="rep-marg"><span style="width:${Math.max(2, 100 * Math.abs(p.margen) / max)}%;background:${p.margen < 0 ? "var(--bad)" : REP_COLOR.ganancia}"></span></div>
-      ${p.sinCosto ? `<div class="hint warn">Sin precio de compra para parte de esto: el margen sale de más.</div>` : ""}</div>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
+    <div class="hint">Desde el dom ${repSem(r.detalleDesde)}${r.semanasDetalle ? ` (${r.semanasDetalle} semanas)` : ""}. Arriba a la derecha: <b>cuánto se vende por semana</b>. El yogur va en <b>litros</b> y los quesos en barra en <b>libras</b>: tócalos para verlos por presentación. Margen = vendido − costo (precio de compra de hoy).</div>
+    <div class="rows">${gs.map(g => g.hijos.length > 1 || g.unidad
+      ? `<details class="row rep-grupo" style="display:block" data-g="${esc(g.base)}" ${S.vista.abiertos[g.base] ? "open" : ""}>
+          <summary style="list-style:none;cursor:pointer">${repFilaProducto(g, r, max, esc(pdfNombre(g.base)) + ` <small class="hint" style="font-weight:400">${S.vista.abiertos[g.base] ? "▾" : "▸"} ${g.hijos.length} presentaci${g.hijos.length === 1 ? "ón" : "ones"}</small>`, g.unidad)}</summary>
+          <div class="rep-hijos">${g.hijos.map(h => `<div class="rep-hijo">${repFilaProducto(h, r, max, esc(pdfNombre(h.pres || "sin presentación")), h.u === "lb" ? "lb" : "")}</div>`).join("")}</div>
+        </details>`
+      : `<div class="row" style="display:block">${repFilaProducto(g.hijos[0], r, max, esc(pdfNombre(g.base)), "")}</div>`).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
+  $$(".rep-grupo").forEach(d => d.addEventListener("toggle", () => { S.vista.abiertos[d.dataset.g] = d.open; const s = d.querySelector("summary small"); if (s) s.textContent = s.textContent.replace(/^[▸▾]/, d.open ? "▾" : "▸"); }));
 }
 
 // ---------- Gráfico de clientes: venta promedio por semana desde el corte ----------
