@@ -595,12 +595,19 @@ function listaCompras() {
   $("#screen").innerHTML = `
     <div class="hint">La misma lista que <b>lista de compras</b> del bot: lo pedido esta semana (sin las ventas al momento). ${actualizadoTxt()}.</div>
     ${l.items.length ? `<div class="card"><pre style="white-space:pre-wrap;font:15px/1.5 var(--body);margin:0">${esc(texto.replace(/\*/g, ""))}</pre></div>
-    <div class="btns"><button class="go" id="copiar">Copiar para WhatsApp</button><button class="go alt" id="compartirLista">Compartir</button></div>`
+    <div class="btns"><button class="go" id="copiar">Copiar para WhatsApp</button><button class="go alt" id="compartirLista">Compartir</button></div>
+    ${(l.quien || []).length ? `<button class="go alt" id="verQuien">👤 ${S.vista.verQuien ? "Ocultar quién tomó cada pedido" : "¿Quién tomó cada pedido?"}</button>
+    ${S.vista.verQuien ? l.quien.map(s => `<div class="card">
+      <div class="line"><b>${esc(s.socio)}</b><span class="hint">${s.clientes.length} cliente${s.clientes.length === 1 ? "" : "s"}</span></div>
+      ${s.clientes.map(c => `<div style="margin-top:4px"><div style="font-weight:700">${esc(c.cliente)}</div>
+        ${c.items.map(it => `<div class="line hint"><span>${esc(pdfNombre(it.d))}</span><span>${Number.isInteger(it.q) ? it.q : Math.round(it.q * 100) / 100}</span></div>`).join("")}</div>`).join("")}
+    </div>`).join("") : ""}` : ""}`
     : `<div class="row">Todavía no hay pedidos esta semana.</div>`}`;
   const co = $("#copiar"); if (co) co.onclick = async () => {
     try { await navigator.clipboard.writeText(texto); toast("✅ Copiada: pégala en WhatsApp"); }
     catch (e) { toast("No se pudo copiar. Usa Compartir."); }
   };
+  const vq = $("#verQuien"); if (vq) vq.onclick = () => { S.vista.verQuien = !S.vista.verQuien; listaCompras(); };
   const sh = $("#compartirLista"); if (sh) sh.onclick = async () => {
     if (navigator.share) { try { await navigator.share({ text: texto }); } catch (e) { /* canceló */ } }
     else { try { await navigator.clipboard.writeText(texto); toast("✅ Copiada: pégala en WhatsApp"); } catch (e) { toast("No se pudo compartir."); } }
