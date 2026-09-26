@@ -744,7 +744,10 @@ function cuentas() {
   const corte = (S.reportes && S.reportes.cobranza && S.reportes.cobranza.desde) || "2026-08-30";
   const semanasCorte = Math.max(1, Math.ceil((Date.now() - new Date(corte + "T00:00:00")) / (7 * 864e5)));
   const vendidoDesde = c => c.docs.filter(d => d.fecha >= corte).reduce((a, d) => a + d.items.reduce((s, it) => s + it.total, 0), 0);
-  const alDia = filas.filter(x => x.c.debe <= 0.005).map(x => Object.assign(x, cobrar ? { tot: vendidoDesde(x.c), prom: vendidoDesde(x.c) / semanasCorte } : {}))
+  // Fuera: los que nunca se facturaron ni pagaron nada ("Dañada", "Inventario":
+  // desechos/conteos de junio anotados como entregas a RD$0). Regla, no lista.
+  const fantasma = c => !c.pagos.length && c.docs.every(d => d.items.every(it => !(Math.abs(it.total) > 0.005)));
+  const alDia = filas.filter(x => x.c.debe <= 0.005 && !(cobrar && fantasma(x.c))).map(x => Object.assign(x, cobrar ? { tot: vendidoDesde(x.c), prom: vendidoDesde(x.c) / semanasCorte } : {}))
     .sort((a, b) => cobrar ? b.prom - a.prom : 0);
   const total = conDeuda.reduce((a, x) => a + x.c.debe, 0);
   header(cobrar ? "Cobros pendientes" : "Deudas pendientes", actualizadoTxt(), true);
