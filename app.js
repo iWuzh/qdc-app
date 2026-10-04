@@ -817,6 +817,14 @@ function analizar(docs, pagos) {
   const P = pagos.map((p, i) => ({ i, p, aplica: [] })).sort((a, b) => a.p.fecha.localeCompare(b.p.fecha) || a.i - b.i);
   for (const p of P) {
     let resto = p.p.monto;
+    // Pago negativo (ajuste que devuelve un cobro): se le quita a lo último que
+    // se había pagado. Si se ignora, las facturas salen más pagadas que la cuenta.
+    if (resto < -0.005) {
+      let quita = -resto;
+      for (let k = D.length - 1; k >= 0 && quita > 0.005; k--) { const d = D[k]; if (d.pagado <= 0.005) continue;
+        const usa = Math.min(d.pagado, quita); d.pagado -= usa; quita -= usa; p.aplica.push({ d, monto: -usa }); d.aplicados.push({ p, monto: -usa }); }
+      p.aFavor = 0; continue;
+    }
     for (const d of D) { if (resto <= 0.005) break; const falta = d.total - d.pagado; if (falta <= 0.005) continue;
       const usa = Math.min(falta, resto); d.pagado += usa; resto -= usa; p.aplica.push({ d, monto: usa }); d.aplicados.push({ p, monto: usa }); }
     p.aFavor = resto;
@@ -979,7 +987,7 @@ function ctaDet() {
       <tr class="tot"><td>Total</td><td></td><td></td><td>${fmt(d.total)}</td></tr></tbody></table></div></div>
     <div class="card">
       <div class="line"><b>Estado</b>${pillEstado(d.estado)}</div>
-      ${d.aplicados.map(ap => `<div class="line"><span>Pago del ${fecha(ap.p.p.fecha)}${ap.p.p.por ? " · " + esc(ap.p.p.por) : ""}</span><span style="color:var(--ok)">−${fmt(ap.monto)}</span></div>`).join("") || `<div class="hint">Sin pagos todavía.</div>`}
+      ${d.aplicados.map(ap => `<div class="line"><span>Pago del ${fecha(ap.p.p.fecha)}${ap.p.p.por ? " · " + esc(ap.p.p.por) : ""}</span><span style="color:var(--ok)">${ap.monto < 0 ? "+" : "−"}${fmt(Math.abs(ap.monto))}</span></div>`).join("") || `<div class="hint">Sin pagos todavía.</div>`}
       <div class="line t"><span>Pendiente</span><span>${fmt(Math.max(d.pend, 0))}</span></div>
     </div>
     ${corregible ? `<div class="btns"><button class="go alt" id="corrEntAbrir">✏️ Corregir esta entrega</button></div>` : ""}`;
