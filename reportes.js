@@ -294,26 +294,40 @@ function repProductos(r) {
 // El color sigue al producto (no al orden): paleta categórica validada en oscuro.
 const REP_COLOR_PROD = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
 const REP_ORDEN_PROD = ["bolas de queso", "mantequilla", "yogur", "queso de freir", "cheddar", "mozzarella", "queso danes"];
-const REP_UOM = [{ u: "", t: "Unidades", d: "bolas y potes" }, { u: "L", t: "Litros", d: "yogur" }, { u: "lb", t: "Libras", d: "quesos en barra" }];
+const REP_UOM = [{ u: "", t: "Unidades", d: "bolas" }, { u: "L", t: "Litros", d: "yogur por presentación" }, { u: "lb", t: "Libras", d: "quesos en barra" }];
+// Fuera de los gráficos: casi no se vende (Marcos, 3-oct). Sigue en la lista de arriba.
+const REP_SIN_GRAFICO = ["mantequilla"];
+// Yogur: una línea por presentación, en litros, siempre en este orden (y color).
+const REP_ORDEN_YOGUR = ["10oz", "litro", "medio galon", "galon"];
 function repSeriesProductos(r, gs) {
   const semanas = r.semanasProd || [];
   if (semanas.length < 2) return "";
   const et = semanas.map(repSem);
   const tarjetas = REP_UOM.map(m => {
-    const prods = gs.filter(g => (g.unidad || "") === m.u && g.serie.some(q => q > 0));
+    const prods = gs.filter(g => (g.unidad || "") === m.u && !REP_SIN_GRAFICO.includes(norm(g.base)) && g.serie.some(q => q > 0));
     if (!prods.length) return "";
-    // Color fijo por producto (el principal en azul), no por cuánto vendió esa semana.
-    const ord = n => { const i = REP_ORDEN_PROD.indexOf(norm(n)); return i < 0 ? 99 : i; };
-    const fijo = prods.map(g => g.base).sort((a, b) => ord(a) - ord(b) || (norm(a) < norm(b) ? -1 : 1));
-    const series = prods.map(g => ({ nombre: pdfNombre(g.base), color: REP_COLOR_PROD[fijo.indexOf(g.base) % REP_COLOR_PROD.length],
-                                     valores: semanas.map((_, k) => Math.round((g.serie[k] || 0) * 10) / 10) }));
+    let series;
+    if (m.u === "L") {
+      // Cada presentación del yogur en litros (10oz 0.296 L, medio galón 1.893 L...).
+      const hijos = prods.flatMap(g => g.hijos).filter(h => (h.serie || []).some(q => q > 0));
+      const ordY = h => { const i = REP_ORDEN_YOGUR.indexOf(norm(h.pres)); return i < 0 ? 99 : i; };
+      series = hijos.sort((a, b) => ordY(a) - ordY(b)).map(h => ({ nombre: pdfNombre(h.pres || "sin presentación"),
+        color: REP_COLOR_PROD[Math.min(ordY(h), REP_COLOR_PROD.length - 1)],
+        valores: semanas.map((_, k) => Math.round(((h.serie || [])[k] || 0) * (REP_LITROS[norm(h.pres)] || 0) * 10) / 10) }));
+    } else {
+      // Color fijo por producto (el principal en azul), no por cuánto vendió esa semana.
+      const ord = n => { const i = REP_ORDEN_PROD.indexOf(norm(n)); return i < 0 ? 99 : i; };
+      const fijo = prods.map(g => g.base).sort((a, b) => ord(a) - ord(b) || (norm(a) < norm(b) ? -1 : 1));
+      series = prods.map(g => ({ nombre: pdfNombre(g.base), color: REP_COLOR_PROD[fijo.indexOf(g.base) % REP_COLOR_PROD.length],
+                                 valores: semanas.map((_, k) => Math.round((g.serie[k] || 0) * 10) / 10) }));
+    }
     return `<div class="card">
       <div class="line"><b>${m.t}</b><span class="hint">${series.length === 1 ? esc(series[0].nombre) : m.d}</span></div>
       ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)))}
     </div>`;
   }).join("");
   return `<div class="label">Lo vendido por semana</div>
-    <div class="hint">Un gráfico por unidad de medida, una línea por producto. La última semana (dom ${repSem(semanas[semanas.length - 1])}) todavía no ha cerrado. Toca un gráfico para ver los números de cada semana.</div>
+    <div class="hint">Un gráfico por unidad de medida, una línea por producto (el yogur, por presentación en litros). La mantequilla no va porque casi no se vende. La última semana (dom ${repSem(semanas[semanas.length - 1])}) todavía no ha cerrado. Toca un gráfico para ver los números de cada semana.</div>
     ${tarjetas}`;
 }
 
