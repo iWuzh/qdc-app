@@ -7,7 +7,7 @@
 
 const MOV = {
   traspaso: { t: "Pasar a otro socio", d: "Se la das a otro socio · no se cobra" },
-  se_quedo: { t: "Vendió", d: "Paga a precio Contado (o lo que cobró)" },
+  se_quedo: { t: "Vendió", d: "A un cliente de la lista o al detalle" },
   perdida: { t: "Se perdió", d: "Paga al costo" },
   desecho: { t: "Desecho", d: "Se dañó · no se cobra" },
   promo: { t: "Promo", d: "Se regaló · no se cobra" }
@@ -86,33 +86,53 @@ function stockMovimiento() {
   for (const it of its) {
     const l = linea(it); if (!l || !num(l.cantidad)) continue;
     if (num(l.cantidad) > it.cantidad + 0.005) excede = true;
-    if (v.mov === "se_quedo") { const pu = l.precio !== "" && l.precio != null ? num(l.precio) : precioUnit(it, "contado"); total += pu * num(l.cantidad); lista += precioUnit(it, "contado") * num(l.cantidad); }
+    if (v.mov === "se_quedo" && v.cliente) total += precioDe(it.producto, it.variante || "", true, v.cliente) * num(l.cantidad);
+    else if (v.mov === "se_quedo") { const pu = l.precio !== "" && l.precio != null ? num(l.precio) : precioUnit(it, "contado"); total += pu * num(l.cantidad); lista += precioUnit(it, "contado") * num(l.cantidad); }
     if (v.mov === "perdida") total += precioUnit(it, "costo") * num(l.cantidad);
   }
   const hay = v.lineas.some(l => num(l.cantidad) > 0);
   const esPaso = v.mov === "traspaso";
   const otros = esPaso ? ((S.catalogo && S.catalogo.socios) || stockSocios().map(x => x.socio)).filter(n => norm(n) !== norm(v.socio)) : [];
+  // Vendió: a un cliente de la lista (él queda debiendo, a su precio) o al detalle (debe el socio).
+  const esVenta = v.mov === "se_quedo", clientes = esVenta ? ((S.catalogo && S.catalogo.clientes) || []) : [];
   $("#screen").innerHTML = `
+    ${esVenta ? `<div class="label">¿A quién se lo vendió?</div>
+      <div class="chips">${clientes.map(c => `<button class="chip sm" data-cli="${esc(c)}" aria-pressed="${v.cliente === c}">${esc(c)}</button>`).join("")}
+        <button class="chip sm otro" data-cli="" aria-pressed="${!v.cliente}">Al detalle / otro</button></div>
+      <div class="hint">${v.cliente ? `${esc(v.cliente)} queda debiendo a su precio, igual que una entrega. Sale del stock de ${esc(v.socio)}.` : `Alguien que no está en la lista: ${esc(v.socio)} paga a precio Contado (o lo que cobró).`}</div>
+      <div class="label">¿Qué vendió?</div>` : ""}
     ${esPaso ? `<div class="label">¿A quién se la pasas?</div>
       <div class="chips">${otros.map(n => `<button class="chip" data-dest="${esc(n)}" aria-pressed="${v.destino === n}">${esc(n)}</button>`).join("")}</div>
       <div class="label">¿Qué le pasas?</div>` : ""}
     <div class="rows">${its.map((it, i) => { const l = linea(it) || {}; return `<div class="row" style="display:block">
       <div class="line"><b>${esc(descItem(it))}</b><span class="hint">tiene ${cantTxt2(it.cantidad, it.u)}</span></div>
       <div class="ctl" style="margin-top:8px"><div class="step"><button data-menos="${i}">−</button><input class="qty" id="mq${i}" inputmode="decimal" placeholder="0" value="${esc(num(l.cantidad) ? l.cantidad : "")}" data-q="${i}"><button data-mas="${i}">+</button></div>
-      ${v.mov === "se_quedo" && num(l.cantidad) ? `<label class="monto" style="margin-top:8px"><span>RD$ c/u</span><input id="mp${i}" inputmode="decimal" value="${esc(l.precio != null && l.precio !== "" ? l.precio : precioUnit(it, "contado"))}" data-p="${i}"></label>` : ""}</div></div>`; }).join("")}</div>
+      ${v.mov === "se_quedo" && !v.cliente && num(l.cantidad) ? `<label class="monto" style="margin-top:8px"><span>RD$ c/u</span><input id="mp${i}" inputmode="decimal" value="${esc(l.precio != null && l.precio !== "" ? l.precio : precioUnit(it, "contado"))}" data-p="${i}"></label>` : ""}</div></div>`; }).join("")}</div>
     ${excede ? `<div class="banner bad">No puede salir más de lo que ${esc(v.socio)} tiene.</div>` : ""}
-    ${hay && !excede ? `<div class="efecto">${v.mov === "se_quedo" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b>${total < lista - 0.005 ? ` (descuento de ${fmt(lista - total)} sobre el precio Contado)` : ""}.`
+    ${hay && !excede ? `<div class="efecto">${v.mov === "se_quedo" && v.cliente ? `<b>${esc(v.cliente)}</b> queda debiendo <b>${fmt(total)}</b> (estimado; la factura sale con su precio).`
+      : v.mov === "se_quedo" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b>${total < lista - 0.005 ? ` (descuento de ${fmt(lista - total)} sobre el precio Contado)` : ""}.`
       : v.mov === "perdida" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b> (al costo).`
       : esPaso ? (v.destino ? `Sale del stock de ${esc(v.socio)} y entra al de <b>${esc(v.destino)}</b>. No se cobra: desde ahora responde ${esc(v.destino)}.` : "Elige a quién se la pasas.")
       : "No se cobra. Queda anotado a nombre de " + esc(v.socio) + "."}</div>` : ""}
     <div class="btns"><button class="go" id="movOk" ${hay && !excede && (!esPaso || v.destino) ? "" : "disabled"}>${esPaso && v.destino ? "Pasar a " + esc(v.destino) : "Guardar"}</button></div>`;
   $$("[data-dest]").forEach(b => b.onclick = () => { v.destino = b.dataset.dest; stockMovimiento(); });
+  $$("[data-cli]").forEach(b => b.onclick = () => { v.cliente = b.dataset.cli || null; stockMovimiento(); });
   const get = i => { let l = linea(its[i]); if (!l) { l = { producto: its[i].producto, presentacion: its[i].variante, sabor: its[i].sabor, cantidad: 0, precio: "" }; v.lineas.push(l); } return l; };
   $$("[data-mas]").forEach(b => b.onclick = () => { const l = get(+b.dataset.mas); l.cantidad = Math.min(its[+b.dataset.mas].cantidad, num(l.cantidad) + 1); stockMovimiento(); });
   $$("[data-menos]").forEach(b => b.onclick = () => { const l = get(+b.dataset.menos); l.cantidad = Math.max(0, num(l.cantidad) - 1); stockMovimiento(); });
   $$("[data-q]").forEach(inp => inp.oninput = () => { get(+inp.dataset.q).cantidad = inp.value.replace(/[^0-9.,]/g, ""); conFoco(stockMovimiento); });
   $$("[data-p]").forEach(inp => inp.oninput = () => { get(+inp.dataset.p).precio = inp.value.replace(/[^0-9.,]/g, ""); conFoco(stockMovimiento); });
   $("#movOk").onclick = () => {
+    if (esVenta && v.cliente) {
+      const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
+        const p = prodCat(l.producto), base = { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "" };
+        // Por libra el stock está en libras: va como 1 pieza con su peso.
+        return p && p.porLibra ? Object.assign(base, { cantidad: 1, libras: num(l.cantidad) }) : Object.assign(base, { cantidad: num(l.cantidad) });
+      });
+      encolar({ tipo: "venta", cliente: v.cliente, items, desdeStock: v.socio });
+      toast(`✅ Vendido a ${v.cliente} (del stock de ${v.socio})`);
+      return ir("stock", { socio: v.socio });
+    }
     const items = v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
       const it = { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: num(l.cantidad) };
       if (v.mov === "se_quedo" && l.precio !== "" && l.precio != null) it.precio = num(l.precio);
