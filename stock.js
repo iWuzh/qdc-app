@@ -47,18 +47,19 @@ function stock() {
   if (v.mov) return stockMovimiento();
   if (v.conteo) return stockConteo();
   if (v.asignar) return stockAsignar();
-  header("Stock", S.stock && S.stock.activo ? "Desde el conteo del " + fecha(S.stock.inicio) : "", false);
-  if (!S.stock) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando stock…" : "Hace falta señal una vez para bajar el stock."}</div>`; return; }
-  if (!S.stock.activo) { $("#screen").innerHTML = `<div class="hint">El stock con responsable arranca con el conteo físico inicial. Todavía no está anotado.</div>`; return; }
+  const activo = S.stock && S.stock.activo;
+  // Sin conteo todavía (o sin datos) solo se ve lo recibido, que no depende del stock.
+  if (!activo || v.socio === RECIBIDO) { v.socio = RECIBIDO; return stockRecibido(); }
+  header("Stock", "Desde el conteo del " + fecha(S.stock.inicio), false);
   v.socio = v.socio || miSocio() || stockSocios()[0].socio;
   const s = socioStock(v.socio), its = itemsDe(v.socio), esMio = norm(v.socio) === norm(miSocio());
-  const conAlgo = stockSocios().filter(x => itemsDe(x.socio).length || norm(x.socio) === norm(miSocio()));
+  const res = s.resumen || [];
   $("#screen").innerHTML = `
     ${avisoSinResponsable()}
-    <div class="chips">${conAlgo.map(x => `<button class="chip" data-soc="${esc(x.socio)}" aria-pressed="${x.socio === v.socio}">${esc(x.socio)}${norm(x.socio) === norm(miSocio()) ? " (tú)" : ""}</button>`).join("")}</div>
+    ${chipsStock(v)}
     <div class="card">
       <div class="k" style="font-weight:700">${esMio ? "Lo que tienes" : "Lo que tiene " + esc(v.socio)}${s.conteo ? ` <span class="hint">· contado el ${fecha(s.conteo)}</span>` : ""}</div>
-      ${its.map(it => `<div class="line"><span>${esc(descItem(it))}</span><b>${cantTxt2(it.cantidad, it.u)}</b></div>`).join("") || `<div class="hint">Nada en stock.</div>`}
+      ${res.length ? tablaSocio(res) : its.map(it => `<div class="line"><span>${esc(descItem(it))}</span><b>${cantTxt2(it.cantidad, it.u)}</b></div>`).join("") || `<div class="hint">Nada en stock.</div>`}
     </div>
     ${its.length ? `<div class="label">¿Qué pasó?</div>
     <div class="big">${Object.keys(MOV).map(k => `<button class="act" data-mov="${k}" style="min-height:0;gap:4px"><div class="t" style="font-size:17px">${MOV[k].t}</div><div class="d">${MOV[k].d}</div></button>`).join("")}</div>` : ""}
@@ -66,7 +67,7 @@ function stock() {
     <div class="hint">Para entregarle a un cliente de la lista desde este stock: en <b>Entregas</b> o <b>Entregar pedido</b>, elige "Del stock de ${esc(v.socio)}". El cliente queda debiendo.</div>
     ${s.movimientos && s.movimientos.length ? `<div class="label">Desde el último conteo</div>
       <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
-  $$("[data-soc]").forEach(b => b.onclick = () => ir("stock", { socio: b.dataset.soc }));
+  cablearChipsStock();
   cablearSinResponsable();
   $$("[data-mov]").forEach(b => b.onclick = () => ir("stock", { socio: v.socio, mov: b.dataset.mov, lineas: [] }));
   $("#contar").onclick = () => ir("stock", { socio: v.socio, conteo: true });
@@ -239,3 +240,64 @@ function bloqueSobrantes(v) {
     <div class="chips">${stockSocios().map(x => `<button class="chip sm" data-sobra="${esc(x.socio)}" aria-pressed="${v.sobraA === x.socio}">${esc(x.socio)}</button>`).join("")}</div></div>`;
 }
 function cablearSobrantes(v, redibujar) { $$("[data-sobra]").forEach(b => b.onclick = () => { v.sobraA = b.dataset.sobra; redibujar(); }); }
+
+// ---------- Chips de arriba: 📦 Recibido + un chip por socio ----------
+const RECIBIDO = "__recibido";
+function chipsStock(v) {
+  const socios = S.stock && S.stock.activo
+    ? stockSocios().filter(x => itemsDe(x.socio).length || (x.resumen || []).length || norm(x.socio) === norm(miSocio())) : [];
+  return `<div class="chips"><button class="chip" data-soc="${RECIBIDO}" aria-pressed="${v.socio === RECIBIDO}">📦 Recibido</button>${socios.map(x =>
+    `<button class="chip" data-soc="${esc(x.socio)}" aria-pressed="${x.socio === v.socio}">${esc(x.socio)}${norm(x.socio) === norm(miSocio()) ? " (tú)" : ""}</button>`).join("")}</div>`;
+}
+function cablearChipsStock() { $$("[data-soc]").forEach(b => b.onclick = () => ir("stock", { socio: b.dataset.soc })); }
+
+// Mismo formato que lo recibido: de dónde salió lo que tiene y a dónde fue.
+const nq = (q, u) => q ? cantTxt2(q, u) : "·";
+function tablaSocio(res) {
+  return `<div class="rc-head rc-5"><span></span><span>Tenía</span><span>Entró</span><span>Vendió</span><span>Otras</span><span>Tiene</span></div>
+    ${res.map(r => `<div class="rc-row rc-5"><span class="rc-n">${esc(descItem(r))}</span><span>${nq(r.tenia, r.u)}</span><span>${nq(r.entro, r.u)}</span>
+      <span>${nq(r.vendio, r.u)}</span><span>${nq(r.otras, r.u)}</span><b>${nq(r.tiene, r.u)}</b></div>`).join("")}
+    <div class="hint">Tenía = el último conteo. Vendió = a clientes desde su stock o "Vendió". Otras = se perdió, desecho y promo.</div>`;
+}
+
+// ---------- 📦 Recibido: lo que llegó en la semana y a dónde fue ----------
+// Servidor: appRecibido (AppStock.js). Solo lee. Semana domingo → sábado.
+const isoMas = (iso, dias) => { const d = new Date(iso + "T12:00:00"); d.setDate(d.getDate() + dias); return d.toISOString().slice(0, 10); };
+function stockRecibido() {
+  const v = S.vista;
+  S.recibido = S.recibido || leer("recibido", {});
+  const clave = v.semana || "actual", r = S.recibido[clave];
+  header("Stock", r ? "Recibido · " + r.etiqueta : "Lo recibido", false);
+  if (!v.pedido) {
+    v.pedido = true;
+    llamar({ accion: "recibido", semana: v.semana || "" }).then(x => {
+      if (!x.ok) return;
+      S.recibido[clave] = x.recibido; guardar("recibido", S.recibido);
+      if (S.tab === "stock" && S.vista === v) stockRecibido();
+    }).catch(() => {});
+  }
+  const actual = !v.semana || (S.recibido.actual && v.semana === S.recibido.actual.semana);
+  const raros = r ? r.items.filter(x => Math.abs(x.sinDueno) >= 0.005) : [];
+  const fila = x => {
+    const mal = Math.abs(x.sinDueno) >= 0.005;
+    return `<details class="rc-det"><summary class="rc-row rc-4 ${mal ? "mal" : ""}"><span class="rc-n">${esc(descItem(x))}</span><span>${nq(x.llego, x.u)}</span><span>${nq(x.aClientes, x.u)}</span><span>${nq(x.aSocios, x.u)}</span>
+        <b>${mal ? (x.sinDueno > 0 ? cantTxt2(x.sinDueno, x.u) : "−" + cantTxt2(-x.sinDueno, x.u)) : "✓"}</b></summary>
+      <div class="rc-quien">${x.clientes.map(c => `<span>${esc(c.n)} ${cantTxt2(c.q, x.u)}</span>`).join("")}${x.socios.map(c => `<span class="soc">📦 ${esc(c.n)} ${cantTxt2(c.q, x.u)}</span>`).join("")}
+        ${mal ? `<div class="hint ${x.sinDueno > 0 ? "warn" : "bad"}">${x.sinDueno > 0 ? "Llegó y nadie lo tiene anotado: ¿a quién se le entregó o quién lo tiene?" : "Salió más de lo que llegó: ¿se anotó mal, o salió de lo que sobró antes?"}</div>` : ""}</div></details>`;
+  };
+  $("#screen").innerHTML = `
+    ${S.stock && S.stock.activo ? avisoSinResponsable() : ""}
+    ${chipsStock(v)}
+    <div class="seg"><button id="rcAnt">‹ Semana anterior</button><button id="rcSig" ${actual ? "disabled" : ""}>Siguiente ›</button></div>
+    ${!r ? `<div class="hint">${S.enLinea ? "Cargando lo recibido…" : "Hace falta señal para ver lo recibido."}</div>` : `
+    <div class="hint">${r.recepciones.length ? "Llegó: " + r.recepciones.map(x => `<b>${fecha(x.fecha)}</b> ${fmt(x.total)}`).join(" · ") : "Todavía no se ha anotado ninguna recepción esta semana."}</div>
+    ${raros.length ? `<div class="banner bad">⚠️ ${raros.length} producto${raros.length > 1 ? "s" : ""} no cuadra${raros.length > 1 ? "n" : ""}. Tócalo para ver a quién se le dio.</div>`
+      : r.items.length ? `<div class="banner ok">✓ Todo lo que llegó tiene dueño: un cliente o un socio.</div>` : ""}
+    ${r.items.length ? `<div class="rc-head rc-4"><span></span><span>Llegó</span><span>Clientes</span><span>Socios</span><span>Sin dueño</span></div>
+      <div class="rc-lista">${raros.concat(r.items.filter(x => !raros.includes(x))).map(fila).join("")}</div>` : ""}
+    <div class="hint">Llegó = recepciones de la semana (domingo y jueves). Lo que se entrega desde el stock de un socio no cuenta aquí: no salió de lo que llegó.</div>`}`;
+  cablearChipsStock();
+  if (S.stock && S.stock.activo) cablearSinResponsable();
+  $("#rcAnt").onclick = () => r && ir("stock", { socio: RECIBIDO, semana: isoMas(r.semana, -7) });
+  $("#rcSig").onclick = () => r && ir("stock", { socio: RECIBIDO, semana: isoMas(r.semana, 7) === (S.recibido.actual || {}).semana ? "" : isoMas(r.semana, 7) });
+}

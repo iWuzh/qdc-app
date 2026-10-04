@@ -335,8 +335,13 @@ function describir(r) {
 
 // ---------- Catálogo ----------
 const prodCat = n => (S.catalogo.productos || []).find(p => norm(p.nombre) === norm(n));
-function precioDe(producto, presentacion, dist) {
+function precioDe(producto, presentacion, dist, cliente) {
   const p = prodCat(producto); if (!p) return 0;
+  // Precio negociado del cliente (pestaña Clientes): gana sobre Distribución/Contado, igual que en el servidor.
+  if (cliente && dist !== "compra") {
+    const neg = ((S.catalogo.preciosCliente || {})[norm(cliente)] || {})[(norm(producto) + " " + norm(presentacion)).trim()];
+    if (neg > 0) return neg;
+  }
   const pr = presentacion ? (p.presentaciones.find(x => norm(x.nombre) === norm(presentacion)) || {}) : p;
   // dist: true = Distribución, false = Contado, "compra" = costo (Recibir).
   return (dist === "compra" ? pr.compra : dist ? pr.distribucion : pr.contado) || 0;
@@ -383,14 +388,14 @@ function piezasRaras(pz) {
   }).filter(i => i >= 0);
 }
 
-function totalLineas(lineas, dist) {
+function totalLineas(lineas, dist, cliente) {
   let total = 0, faltaPeso = false;
   for (const l of lineas) {
     const q = num(l.cantidad); if (!q) continue;
     const p = prodCat(l.producto);
     if (p && p.porLibra) normalizarPeso(l);
-    if (p && p.porLibra) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist); else faltaPeso = true; }
-    else total += q * precioDe(l.producto, l.presentacion, dist);
+    if (p && p.porLibra) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist, cliente); else faltaPeso = true; }
+    else total += q * precioDe(l.producto, l.presentacion, dist, cliente);
   }
   return { total, faltaPeso, hay: lineas.some(l => num(l.cantidad) > 0) };
 }
@@ -404,7 +409,7 @@ function selector(v, dist, esEntrega) {
     const k = [p.nombre, pr, s].join("|");
     const id = idDe(k);
     filas.push({ k, p: p.nombre, pr, s, id });
-    const precio = precioDe(p.nombre, pr, dist);
+    const precio = precioDe(p.nombre, pr, dist, v.cliente);
     return `<div class="ln" style="${num(q) > 0 ? "" : "opacity:.85"}">
       <div><div class="d">${esc(etiqueta)}</div><div class="x">${precio ? fmt(precio) + (p.porLibra ? "/lb" : " c/u") : ""}${l && l.nota ? ` · ${esc(l.nota)}` : esEntrega && l && l.pedido ? ` · pidió ${l.pedido}` : ""}</div></div>
       <div class="ctl">
@@ -474,7 +479,7 @@ function pedido() {
   header("Nuevo pedido", "Guárdalo para la ruta, o entrégalo ya", true);
   const clientes = S.catalogo.clientes;
   const dist = !v.otro && !!v.cliente;
-  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist);
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist, v.otro ? null : v.cliente);
   const quien = v.otro ? ((v.ref || "").trim() || "Contado") : v.cliente;
   const sel = selector(v, dist, false);
   $("#screen").innerHTML = `
@@ -551,7 +556,7 @@ function entrega() {
   const v = S.vista, dist = S.catalogo && S.catalogo.clientes.includes(v.cliente);
   header("Entregar a " + v.cliente, "Ya viene con lo que pidió: ajusta o agrega", true);
   if (!S.catalogo) { $("#screen").innerHTML = `<div class="hint">Cargando lista de productos…</div>`; return; }
-  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist);
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, dist, v.cliente);
   const sel = selector(v, dist, true);
   $("#screen").innerHTML = `
     <div class="hint">Lo que pidió ya viene cargado ("pidió N"). Cambia cantidades con ➖/➕ o escribiéndolas, y agrega lo que no pidió.</div>

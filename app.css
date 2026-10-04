@@ -166,3 +166,20 @@ input.qty{width:56px;height:40px;border-radius:11px;border:1.5px solid var(--lin
 .ef-x{color:var(--ink-2);font-weight:700}
 input.ef-q{width:72px}
 .ef-sub{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+
+/* Stock: Recibido y resumen por socio */
+.rc-head,.rc-row{display:grid;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+.rc-4{grid-template-columns:minmax(0,1fr) 46px 58px 50px 58px}
+.rc-5{grid-template-columns:minmax(0,1fr) 42px 42px 48px 42px 44px}
+.rc-head{font-size:11px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--ink-2);text-align:right;padding:0 12px}
+.rc-row{padding:10px 12px;border-bottom:1px solid var(--line);text-align:right;font-size:14px}
+.rc-row .rc-n{text-align:left;font-weight:600;overflow:hidden;text-overflow:ellipsis}
+.rc-row.mal{background:var(--warn-soft)} .rc-row.mal b{color:var(--bad)} .rc-row b{color:var(--ok)}
+.card .rc-row{padding:8px 0} .card .rc-head{padding:0} .card .rc-row b{color:var(--ink)} .card .rc-row:last-of-type{border-bottom:0}
+.rc-lista{border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.rc-det summary{list-style:none;cursor:pointer} .rc-det summary::-webkit-details-marker{display:none}
+.rc-quien{display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px 12px;border-bottom:1px solid var(--line);font-size:13px}
+.rc-quien span{background:var(--surface-2);border-radius:999px;padding:3px 10px}
+.rc-quien span.soc{background:var(--verde-soft)}
+.rc-quien .hint{flex-basis:100%}
+.banner.ok{background:var(--ok-soft);color:var(--ok)}
