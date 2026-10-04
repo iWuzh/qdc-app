@@ -231,13 +231,14 @@ function repAgruparProductos(ps) {
   for (const p of ps) {
     const [base, pres] = p.producto.split(" · ");
     const k = norm(base);
-    if (!grupos[k]) { grupos[k] = { base, hijos: [], vendido: 0, margen: 0, ventaSemana: 0, cant: 0, porSemana: 0, unidad: "", sinCosto: false, rec: 0, ant: 0, hayRec: false, hayAnt: false }; orden.push(k); }
+    if (!grupos[k]) { grupos[k] = { base, hijos: [], vendido: 0, margen: 0, ventaSemana: 0, cant: 0, porSemana: 0, unidad: "", sinCosto: false, rec: 0, ant: 0, hayRec: false, hayAnt: false, serie: [] }; orden.push(k); }
     const g = grupos[k];
     g.hijos.push(Object.assign({ pres: pres || "" }, p));
     g.vendido += p.vendido; g.margen += p.margen; g.ventaSemana += p.ventaSemana || 0; g.sinCosto = g.sinCosto || p.sinCosto;
     const f = k === "yogur" ? (REP_LITROS[norm(pres)] || 0) : 1;
     if (k === "yogur") g.unidad = "L"; else if (p.u === "lb") g.unidad = "lb";
     g.cant += p.q * f; g.porSemana += (p.porSemana || 0) * f;
+    (p.serie || []).forEach((q, i) => { g.serie[i] = (g.serie[i] || 0) + q * f; });
     const t = p.tendencia || {};
     if (t.reciente != null) { g.rec += t.reciente * f; g.hayRec = true; }
     if (t.anterior != null) { g.ant += t.anterior * f; g.hayAnt = true; }
@@ -281,8 +282,39 @@ function repProductos(r) {
             <span><b>${Math.round((h.porSemana || 0) * 10) / 10}${h.u === "lb" ? " lb" : ""}</b><small class="hint"> /sem</small>${repFlecha(h.tendencia)} <span class="hint">· margen ${repPct(h)}</span></span></div>`).join("") : ""}
           ${totales(g)}
         </div></details>`;
-    }).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>`;
+    }).join("") || `<div class="row">Sin ventas en estas semanas.</div>`}</div>
+    ${repSeriesProductos(r, gs)}`;
   $$(".rep-grupo").forEach(d => d.addEventListener("toggle", () => { S.vista.abiertos[d.dataset.g] = d.open; const s = d.querySelector(".rep-abre"); if (s) s.textContent = d.open ? "▾" : "▸"; }));
+  REP_UOM.forEach(m => repCablearLineas("gUom" + (m.u || "u"), v => (Math.round(v * 10) / 10).toLocaleString("en-US") + (m.u ? " " + m.u : "")));
+}
+
+// Cantidad vendida por semana: UN gráfico por unidad de medida (pedido de
+// Marcos, 3-oct), con una línea por producto. Así cada eje tiene una sola
+// unidad: unidades (bolas, mantequilla), litros (yogur) y libras (quesos en barra).
+// El color sigue al producto (no al orden): paleta categórica validada en oscuro.
+const REP_COLOR_PROD = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
+const REP_ORDEN_PROD = ["bolas de queso", "mantequilla", "yogur", "queso de freir", "cheddar", "mozzarella", "queso danes"];
+const REP_UOM = [{ u: "", t: "Unidades", d: "bolas y potes" }, { u: "L", t: "Litros", d: "yogur" }, { u: "lb", t: "Libras", d: "quesos en barra" }];
+function repSeriesProductos(r, gs) {
+  const semanas = r.semanasProd || [];
+  if (semanas.length < 2) return "";
+  const et = semanas.map(repSem);
+  const tarjetas = REP_UOM.map(m => {
+    const prods = gs.filter(g => (g.unidad || "") === m.u && g.serie.some(q => q > 0));
+    if (!prods.length) return "";
+    // Color fijo por producto (el principal en azul), no por cuánto vendió esa semana.
+    const ord = n => { const i = REP_ORDEN_PROD.indexOf(norm(n)); return i < 0 ? 99 : i; };
+    const fijo = prods.map(g => g.base).sort((a, b) => ord(a) - ord(b) || (norm(a) < norm(b) ? -1 : 1));
+    const series = prods.map(g => ({ nombre: pdfNombre(g.base), color: REP_COLOR_PROD[fijo.indexOf(g.base) % REP_COLOR_PROD.length],
+                                     valores: semanas.map((_, k) => Math.round((g.serie[k] || 0) * 10) / 10) }));
+    return `<div class="card">
+      <div class="line"><b>${m.t}</b><span class="hint">${series.length === 1 ? esc(series[0].nombre) : m.d}</span></div>
+      ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)))}
+    </div>`;
+  }).join("");
+  return `<div class="label">Lo vendido por semana</div>
+    <div class="hint">Un gráfico por unidad de medida, una línea por producto. La última semana (dom ${repSem(semanas[semanas.length - 1])}) todavía no ha cerrado. Toca un gráfico para ver los números de cada semana.</div>
+    ${tarjetas}`;
 }
 
 // ---------- Gráfico de clientes: venta promedio por semana desde el corte ----------
