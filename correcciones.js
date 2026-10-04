@@ -2,6 +2,8 @@
 // original (sin líneas negativas) y guarda antes/después en "Correcciones".
 // Pedidos: desde "¿Quién tomó cada pedido?" (lista de compras).
 // Cobros y pagos: desde Cuentas → histórico → el pago.
+// Entregas: desde Cuentas → cliente → la entrega → ✏️ Corregir esta entrega
+// (el servidor ajusta también su factura QDC y, si salió de un stock, el stock).
 "use strict";
 
 // ---------- Pedido de un cliente (todas sus filas de la semana) ----------
@@ -71,4 +73,53 @@ function cablearCorregirPago(p, cobrar, redibujar) {
   };
   const an = $("#corrAnular"); if (an) an.onclick = () => enviar({ anular: true });
   const gu = $("#corrGuardar"); if (gu) gu.onclick = () => enviar({ monto: num(v.corrMonto) });
+}
+
+// ---------- Entrega: cambiar cantidades o anular líneas ----------
+// La cantidad nueva se cobra al MISMO precio por unidad que tenía la línea.
+function corrEntrega(c, d) {
+  const v = S.vista;
+  header("Corregir entrega", v.quien + " · " + d.d.n, true);
+  const its = d.d.items.filter(it => it.fila && !it.ajuste);
+  v.nuevo = v.nuevo || {};
+  const cur = it => v.nuevo[it.fila] === undefined ? it.q : num(v.nuevo[it.fila]);
+  const anul = it => v.nuevo[it.fila] === "anular";
+  const cambios = its.filter(it => v.nuevo[it.fila] !== undefined && (anul(it) || Math.abs(cur(it) - it.q) > 0.0005));
+  const nuevoTotal = it => anul(it) ? 0 : it.q ? Math.round(it.total * cur(it) / it.q * 100) / 100 : it.total;
+  const dif = cambios.reduce((a, it) => a + nuevoTotal(it) - it.total, 0);
+  $("#screen").innerHTML = `
+    <div class="hint">Cambia lo que de verdad se entregó, o anula la línea. Se corrige la entrega original al mismo precio, su factura y, si salió del stock de un socio, ese stock. Queda anotado quién lo cambió y por qué.</div>
+    <div class="rows">${its.map(it => { const a = anul(it); return `<div class="row" style="display:block;${a ? "opacity:.55" : ""}">
+      <div class="line"><b style="${a ? "text-decoration:line-through" : ""}">${esc(pdfNombre(it.d))}</b><span class="hint">era ${cantTxt(it)} · ${fmt(it.total)}</span></div>
+      <div class="line" style="align-items:center;margin-top:8px">
+        ${a ? `<span class="hint bad">Se anula</span>` : `<div class="step"><button data-em="${it.fila}">−</button><input class="qty" id="eq${it.fila}" inputmode="decimal" value="${esc(v.nuevo[it.fila] === undefined ? it.q : v.nuevo[it.fila])}" data-eq="${it.fila}"><button data-ep="${it.fila}">+</button></div>
+          <span class="hint">${fmt(nuevoTotal(it))}</span>`}
+        <button class="chip sm" data-ea="${it.fila}" aria-pressed="${a}">${a ? "Deshacer" : "Anular"}</button></div></div>`; }).join("")}</div>
+    ${cambios.length ? `<div class="efecto">La entrega ${dif < 0 ? "baja" : "sube"} <b>${fmt(Math.abs(dif))}</b>: ${esc(v.quien)} queda debiendo <b>${fmt(c.debe + dif)}</b>.</div>` : ""}
+    <div class="field"><label for="corrMotE">¿Por qué? (opcional)</label><input class="txt" id="corrMotE" placeholder="Ej: se anotaron 20 y fueron 15" value="${esc(v.motivo || "")}"></div>
+    <div class="btns"><button class="go alt" id="corrEntNo">Cancelar</button><button class="go" id="corrEntOk" ${cambios.length ? "" : "disabled"}>Guardar ${cambios.length ? cambios.length + " cambio" + (cambios.length > 1 ? "s" : "") : ""}</button></div>`;
+  const fil = n => its.find(it => it.fila === +n);
+  const paso = it => it.u ? 0.5 : 1;
+  $$("[data-ep]").forEach(b => b.onclick = () => { const it = fil(b.dataset.ep); v.nuevo[it.fila] = String(Math.round((cur(it) + paso(it)) * 100) / 100); corrEntrega(c, d); });
+  $$("[data-em]").forEach(b => b.onclick = () => { const it = fil(b.dataset.em); v.nuevo[it.fila] = String(Math.max(0, Math.round((cur(it) - paso(it)) * 100) / 100)); corrEntrega(c, d); });
+  $$("[data-eq]").forEach(i => i.oninput = () => { v.nuevo[i.dataset.eq] = i.value.replace(/[^0-9.,]/g, ""); conFoco(() => corrEntrega(c, d)); });
+  $$("[data-ea]").forEach(b => b.onclick = () => { const it = fil(b.dataset.ea); v.nuevo[it.fila] = anul(it) ? undefined : "anular"; corrEntrega(c, d); });
+  $("#corrMotE").oninput = e => { v.motivo = e.target.value; };
+  $("#corrEntNo").onclick = () => { v.corrEnt = false; ctaDet(); };
+  $("#corrEntOk").onclick = () => {
+    encolar({ tipo: "correccion", hoja: "Entregas", motivo: (v.motivo || "").trim(),
+      cambios: cambios.map(it => anul(it) || cur(it) === 0 ? { fila: it.fila, firma: it.firma, anular: true } : { fila: it.fila, firma: it.firma, cantidad: cur(it) }) });
+    // Se ve al momento; el servidor manda los números buenos al sincronizar.
+    const orig = c.docs.flatMap(x => x.items);
+    cambios.forEach(it => {
+      const t = nuevoTotal(it), o = orig.find(x => x.fila === it.fila);
+      c.facturado += t - it.total; c.debe += t - it.total;
+      if (o) { o.q = anul(it) ? 0 : cur(it); o.total = t; o.fila = null; }   // sin fila: no se re-corrige hasta sincronizar
+    });
+    c.docs.forEach(x => { x.items = x.items.filter(o => o.q > 0 || o.ajuste); });
+    c.docs = c.docs.filter(x => x.items.length);
+    guardar("cuentas", S.cuentas);
+    toast("✏️ Entrega corregida");
+    ir("cuentas", { lado: v.lado, quien: v.quien, nivel: "hist" });
+  };
 }

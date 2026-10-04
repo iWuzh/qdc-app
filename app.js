@@ -877,7 +877,7 @@ function cuentas() {
 }
 function cuentaSel() { const v = S.vista; return v.lado === "cobrar" ? S.cuentas.cobrar.find(c => c.cliente === v.quien) : S.cuentas.pagar.find(p => p.proveedor === v.quien); }
 function docsDe(c, cobrar) {
-  return cobrar ? c.docs.map(d => ({ fecha: d.fecha, n: "Entrega del " + fecha(d.fecha), items: d.items.map(it => ({ d: it.d, q: it.q, u: it.u, total: it.total })) }))
+  return cobrar ? c.docs.map(d => ({ fecha: d.fecha, n: "Entrega del " + fecha(d.fecha), items: d.items.map(it => ({ d: it.d, q: it.q, u: it.u, total: it.total, fila: it.fila, firma: it.firma, ajuste: it.ajuste })) }))
                 : c.docs.map(d => ({ fecha: d.fecha, n: "Factura del " + fecha(d.fecha), total: d.total, items: d.items, semana: d.semana, avisos: d.avisos || [] }));
 }
 
@@ -967,7 +967,9 @@ function ctaDet() {
     return;
   }
   const d = a.D.find(x => x.i === v.doc);
+  if (v.corrEnt && cobrar) return corrEntrega(c, d);
   header(d.d.n, v.quien + (d.d.semana ? " · cubre la semana del " + fecha(d.d.semana) : ""), true);
+  const corregible = cobrar && d.d.items.some(it => it.fila && !it.ajuste);
   $("#screen").innerHTML = `
     ${(d.d.avisos || []).map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("")}
     <div class="card"><div style="overflow-x:auto"><table class="tabla">
@@ -979,7 +981,9 @@ function ctaDet() {
       <div class="line"><b>Estado</b>${pillEstado(d.estado)}</div>
       ${d.aplicados.map(ap => `<div class="line"><span>Pago del ${fecha(ap.p.p.fecha)}${ap.p.p.por ? " · " + esc(ap.p.p.por) : ""}</span><span style="color:var(--ok)">−${fmt(ap.monto)}</span></div>`).join("") || `<div class="hint">Sin pagos todavía.</div>`}
       <div class="line t"><span>Pendiente</span><span>${fmt(Math.max(d.pend, 0))}</span></div>
-    </div>`;
+    </div>
+    ${corregible ? `<div class="btns"><button class="go alt" id="corrEntAbrir">✏️ Corregir esta entrega</button></div>` : ""}`;
+  const ce = $("#corrEntAbrir"); if (ce) ce.onclick = () => { v.corrEnt = true; v.nuevo = {}; v.motivo = ""; ctaDet(); };
 }
 
 // ---------- Navegación ----------
