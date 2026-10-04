@@ -7,7 +7,7 @@
 // debajo de cada gráfico. Colores validados contra el fondo #0F1339.
 "use strict";
 
-const REP_COLOR = { vendido: "#3987e5", ganancia: "#5AA84F" };
+const REP_COLOR = { vendido: "#3987e5", ganancia: "#5AA84F", cobrado: "#C4841C" };
 // Antigüedad de lo que se debe: colores de estado (siempre con su texto al lado).
 const REP_TRAMOS = [
   { k: "0-7", t: "0–7 días", c: "var(--ok)" },
@@ -180,6 +180,7 @@ function repCobros(r) {
     </div>
     ${semanas.length > 1 ? `<div class="card"><div class="k" style="font-weight:700">Días para cobrar, por semana de entrega</div>
       ${repLineas("gDias", semanas.map(s => repSem(s.semana)), [{ nombre: "Días para cobrar", color: REP_COLOR.vendido, valores: semanas.map(s => s.dias) }], n => String(Math.round(n)))}</div>` : ""}
+    ${repVendidoCobrado(r)}
     <div class="label">Quién debe (lo más viejo primero)</div>
     <div class="rows">${c.deudores.map(d => `<button class="row" data-cli="${esc(d.cliente)}"><div><div style="font-weight:700">${esc(d.cliente)}</div>
       <div class="s"><b>${total ? Math.round(100 * d.debe / total) : 0}%</b> de lo que nos deben · ${d.dias == null ? "no ha pagado nada desde el corte" : `tarda ${d.dias} día${d.dias === 1 ? "" : "s"} en pagar`}${d.vencido > 0.5 ? ` · <span style="color:var(--bad);font-weight:700">⚠️ ${repMonto(d.vencido)} con más de 14 días</span>` : ""}</div></div>
@@ -187,6 +188,36 @@ function repCobros(r) {
     <div class="hint">Cuenta desde el punto de partida (${c.desde ? fecha(c.desde) : "todo el histórico"}); antes de esa fecha todo está en cero. Los pagos se aplican a la entrega más vieja.</div>`;
   $$("[data-cli]").forEach(b => b.onclick = () => ir("cuentas", { lado: "cobrar", quien: b.dataset.cli, nivel: "deuda" }));
   repCablearLineas("gDias", n => n + " días");
+  repCablearLineas("gVyC", repMonto);
+  repCablearLineas("gDebe", repMonto);
+}
+
+// ¿Cobramos al ritmo que vendemos? Vendido vs cobrado por semana, y lo que nos
+// deben al cierre de cada semana (sube = vendemos más de lo que cobramos).
+function repVendidoCobrado(r) {
+  // Solo las semanas DESPUÉS del corte: antes los cobros se anotaron como ajustes
+  // y "cobrado" sale en cero aunque sí se cobró.
+  const corte = r.cobranza && r.cobranza.desde ? r.cobranza.desde : "";
+  const sem = r.semanas.filter(s => s.semana > corte).map(s => ({ ...s, vacia: !s.vendido && !s.cobrado && !s.gastos }));
+  if (sem.filter(s => !s.vacia).length < 2) return "";
+  const et = sem.map(s => repSem(s.semana));
+  const conDebe = sem.filter(s => s.debeAlCierre != null);
+  const ult = conDebe[conDebe.length - 1], prev = conDebe[conDebe.length - 2];
+  return `<div class="card">
+      <div class="k" style="font-weight:700">¿Cobramos al ritmo que vendemos?</div>
+      ${repLineas("gVyC", et, [
+        { nombre: "Vendido", color: REP_COLOR.vendido, valores: sem.map(s => s.vacia ? null : s.vendido) },
+        { nombre: "Cobrado", color: REP_COLOR.cobrado, valores: sem.map(s => s.vacia ? null : s.cobrado) }
+      ], repCorto)}
+      <div class="hint">Cobrado brinca: muchos pagan la semana siguiente, o lo atrasado de golpe. Lo que importa es la línea de abajo.</div>
+    </div>
+    ${conDebe.length > 1 ? `<div class="card">
+      <div class="k" style="font-weight:700">Nos deben, al cierre de cada semana</div>
+      ${repLineas("gDebe", et, [{ nombre: "Nos deben", color: REP_COLOR.cobrado, valores: sem.map(s => s.debeAlCierre == null ? null : s.debeAlCierre) }], repCorto)}
+      <div class="hint">${prev ? (ult.debeAlCierre > prev.debeAlCierre + 0.5 ? `▲ Subió ${repMonto(ult.debeAlCierre - prev.debeAlCierre)} esta semana: se vendió más de lo que se cobró.`
+        : ult.debeAlCierre < prev.debeAlCierre - 0.5 ? `▼ Bajó ${repMonto(prev.debeAlCierre - ult.debeAlCierre)} esta semana: se cobró más de lo que se vendió.` : "Igual que la semana anterior.") : ""}
+        Si sube semana tras semana, los clientes se están atrasando. La última semana todavía no cierra.</div>
+    </div>` : ""}`;
 }
 
 // Productos agrupados (pedido de Marcos, 26 sep): el yogur en LITROS y cada
