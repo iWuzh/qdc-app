@@ -1,12 +1,12 @@
 // Stock con responsable (Fase 3) — pantallas. El servidor es AppStock.js.
-// Cada socio ve lo suyo primero. Salidas: Vendió / se lo quedó (paga Contado o
+// Cada socio ve lo suyo primero. Salidas: Vendió (paga Contado o
 // el precio real), Se perdió (paga al costo), Desecho, Promo. Conteo: la
 // diferencia se explica o no se guarda. Todo pasa por la cola (sin señal
 // también), y el saldo se ajusta en el teléfono al momento.
 "use strict";
 
 const MOV = {
-  se_quedo: { t: "Vendió / se lo quedó", d: "Paga a precio Contado (o lo que cobró)" },
+  se_quedo: { t: "Vendió", d: "Paga a precio Contado (o lo que cobró)" },
   perdida: { t: "Se perdió", d: "Paga al costo" },
   desecho: { t: "Desecho", d: "Se dañó · no se cobra" },
   promo: { t: "Promo", d: "Se regaló · no se cobra" }
@@ -65,7 +65,7 @@ function stock() {
     <button class="go ${its.length ? "alt" : ""}" id="contar">Contar ${esMio ? "mi" : "el"} stock${esMio ? "" : " de " + esc(v.socio)}</button>
     <div class="hint">Para entregarle a un cliente de la lista desde este stock: en <b>Entregas</b> o <b>Entregar pedido</b>, elige "Del stock de ${esc(v.socio)}". El cliente queda debiendo.</div>
     ${s.movimientos && s.movimientos.length ? `<div class="label">Desde el último conteo</div>
-      <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió / se lo quedó" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
+      <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
   $$("[data-soc]").forEach(b => b.onclick = () => ir("stock", { socio: b.dataset.soc }));
   cablearSinResponsable();
   $$("[data-mov]").forEach(b => b.onclick = () => ir("stock", { socio: v.socio, mov: b.dataset.mov, lineas: [] }));
