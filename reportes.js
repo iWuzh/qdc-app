@@ -325,7 +325,7 @@ function repSeriesProductos(r, gs) {
     }
     return `<div class="card">
       <div class="line"><b>${m.t}</b><span class="hint">${series.length === 1 ? esc(series[0].nombre) : m.d}</span></div>
-      ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)), { leyendaAbajo: m.u === "lb" })}
+      ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)), { leyendaAbajo: m.u === "lb" || m.u === "L" })}
     </div>`;
   }).join("");
   return `<div class="label">Lo vendido por semana</div>
