@@ -61,6 +61,8 @@ function aplicarLocal(reg) {
   if (S.cuentas && S.cuentas.caja && ["cobro", "pago", "gasto"].includes(reg.tipo)) {
     S.cuentas.caja.efectivo += reg.tipo === "cobro" ? reg.monto : -reg.monto;
   }
+  // Ajuste por conteo: la caja queda en lo contado (el servidor hace la misma cuenta).
+  if (reg.tipo === "ajuste_caja" && S.cuentas && S.cuentas.caja) S.cuentas.caja.efectivo = reg.contado;
   if ((reg.tipo === "cobro") && S.cuentas) {
     const c = S.cuentas.cobrar.find(x => x.cliente === reg.cliente);
     if (c) { c.pagos.push({ fecha: hoyIso(), monto: reg.monto, por: S.sesion.nombre, local: true }); c.pagado += reg.monto; c.debe -= reg.monto; }
@@ -269,7 +271,7 @@ function panelRapido(v, deben) {
   const m = num(v.monto);
   if (v.rapido === "gasto") return `<div class="panel">
     <div class="field"><label for="gDesc">¿En qué?</label><input class="txt" id="gDesc" placeholder="Ej: gasolina ruta" value="${esc(v.desc)}"></div>
-    <label class="monto"><span>RD$</span><input id="pgMonto" inputmode="decimal" placeholder="Monto" value="${esc(v.monto)}"></label>
+    <div class="chips" style="align-items:center"><label class="monto"><span>RD$</span><input id="pgMonto" inputmode="decimal" placeholder="Monto" value="${esc(v.monto)}"></label>${botonCalc()}</div>
     <div class="btns"><button class="go alt" id="pgCancelar">Cancelar</button><button class="go" id="pgOk" ${m > 0 && (v.desc || "").trim() ? "" : "disabled"}>Registrar gasto</button></div></div>`;
   const esCobro = v.rapido === "cobro";
   const lista = esCobro ? deben.map(c => ({ n: c.cliente, debe: c.debe })) : (S.cuentas ? S.cuentas.pagar.map(p => ({ n: p.proveedor, debe: p.debe })) : (S.catalogo ? S.catalogo.proveedores.map(n => ({ n, debe: null })) : []));
@@ -279,14 +281,17 @@ function panelRapido(v, deben) {
       <div class="chips">${lista.map(x => `<button class="chip sm" data-quien="${esc(x.n)}" aria-pressed="${v.quien === x.n}">${esc(x.n)}${x.debe != null ? " · " + fmt(x.debe) : ""}</button>`).join("") || `<span class="hint">${esCobro ? "Nadie debe nada 🎉" : "Sin proveedores"}</span>`}</div></div>
     ${v.quien ? `<div class="chips" style="align-items:center">
         ${sel && sel.debe > 0 ? `<button class="chip sm" id="pgTodo" aria-pressed="${m === sel.debe}">Todo · ${fmt(sel.debe)}</button>` : ""}
-        <label class="monto"><span>RD$</span><input id="pgMonto" inputmode="decimal" placeholder="Otro monto" value="${esc(v.monto)}"></label></div>
+        <label class="monto"><span>RD$</span><input id="pgMonto" inputmode="decimal" placeholder="Otro monto" value="${esc(v.monto)}"></label>${botonCalc()}</div>
       ${m > 0 && sel && sel.debe != null ? `<div class="efecto">${m >= sel.debe ? "Queda <b>al día</b>." : `Abono. ${esCobro ? "Queda debiendo" : "Le seguimos debiendo"} <b>${fmt(sel.debe - m)}</b>.`}</div>` : ""}
       <div class="btns"><button class="go alt" id="pgCancelar">Cancelar</button><button class="go" id="pgOk" ${m > 0 ? "" : "disabled"}>${esCobro ? "Registrar cobro" : "Registrar pago"}</button></div>` : ""}
   </div>`;
 }
 
+// La calculadora de billetes también sirve para armar el monto de un cobro, pago o gasto.
+const botonCalc = () => S.tab === "inicio" ? `<button class="chip sm" id="pgCalc" aria-label="Contar billetes">💵 Contar</button>` : "";
 function cablearRapido(v, redibujar) {
   redibujar = redibujar || inicio;
+  const calc = $("#pgCalc"); if (calc) calc.onclick = () => ir("inicio", { contar: "monto", para: { rapido: v.rapido, quien: v.quien, desc: v.desc } });
   $$("[data-quien]").forEach(b => b.onclick = () => { v.quien = b.dataset.quien; v.monto = ""; redibujar(); });
   const t = $("#pgTodo"); if (t) t.onclick = () => { const x = (v.rapido === "cobro" ? S.cuentas.cobrar.find(c => c.cliente === v.quien) : S.cuentas.pagar.find(p => p.proveedor === v.quien)); v.monto = String(Math.round(x.debe * 100) / 100); redibujar(); };
   const mo = $("#pgMonto"); if (mo) mo.oninput = e => { v.monto = e.target.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); };
@@ -320,6 +325,7 @@ function describir(r) {
   if (r.tipo === "cobro") return `Cobro de ${r.cliente} · ${fmt(r.monto)}`;
   if (r.tipo === "pago") return `Pago a ${r.proveedor} · ${fmt(r.monto)}`;
   if (r.tipo === "gasto") return `Gasto ${r.descripcion} · ${fmt(r.monto)}`;
+  if (r.tipo === "ajuste_caja") return `Ajuste de caja a ${fmt(r.contado)} · ${r.motivo}`;
   if (r.tipo === "factura") return `Factura de ${r.proveedor} (semana del ${fecha(r.semana)}) · ${fmt(r.monto)}`;
   if (r.tipo === "stock") return `${(MOV[r.movimiento] || {}).t || r.movimiento} · ${r.socio}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
   if (r.tipo === "conteo") return `Conteo de ${r.socio}`;
@@ -954,6 +960,7 @@ $("#back").onclick = () => {
   if (S.tab === "recibir" && v.corr) return ir("recibir", { lista: true, verQuien: true });
   if (S.tab === "recibir" && (v.factura || v.lista)) return ir("recibir");
   if (S.tab === "stock" && (v.mov || v.conteo || v.asignar)) return ir("stock", { socio: v.socio });
+  if (S.tab === "inicio" && v.contar === "monto" && v.para) return ir("inicio", Object.assign({}, v.para));
   ir("inicio");
 };
 $("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };
