@@ -143,3 +143,26 @@ input.qty{width:56px;height:40px;border-radius:11px;border:1.5px solid var(--lin
 .rep-hijo .line b{font-size:14px}
 .rep-fl{font-size:13px;font-weight:700;margin-left:4px}
 .rep-tot{border-top:1px solid var(--line);padding-top:8px}
+/* Quesos por libra: una línea por pieza */
+.pzs{margin:-2px 0 2px;padding:10px 12px;border:1px dashed var(--line);border-radius:12px;display:flex;flex-direction:column;gap:8px}
+.pzt{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:14px;font-variant-numeric:tabular-nums}
+.pzf{color:var(--warn);font-weight:700;font-size:13px;white-space:nowrap} .pzok{color:var(--ok);font-weight:700;font-size:13px;white-space:nowrap}
+.pzg{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px}
+.pz{min-width:0;display:flex;align-items:center;gap:6px;background:var(--field);border:1.5px solid var(--line);border-radius:11px;padding:0 10px;height:44px}
+.pz span{font-size:12px;font-weight:700;color:var(--ink-2);min-width:16px}
+.pz input{flex:1;min-width:0;width:100%;border:0;background:none;color:var(--ink);font:700 17px var(--body);text-align:right;padding:0;outline:none;font-variant-numeric:tabular-nums}
+.pz em{font-style:normal;font-size:13px;color:var(--ink-2)}
+.pz.need{border-color:var(--warn)} .pz.raro{border-color:var(--bad);background:var(--warn-soft)}
+.pz:focus-within{border-color:var(--ok)}
+/* Contar efectivo */
+.ef-tot{position:sticky;top:69px;z-index:3;background:var(--surface);border:1.5px solid var(--verde);border-radius:16px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.ef-tot .k{font-size:13px;color:var(--ink-2)}
+.ef-tot .v{font:800 38px var(--display);line-height:1.1;font-variant-numeric:tabular-nums}
+.ef-dif{font-size:14px;border-radius:10px;padding:6px 10px} .ef-dif.ok{background:var(--ok-soft);color:var(--ok)} .ef-dif.bad{background:var(--warn-soft);color:var(--bad)}
+.ef-lista{display:flex;flex-direction:column;gap:8px}
+.ef-fila{display:grid;grid-template-columns:96px auto 72px 1fr;align-items:center;gap:10px}
+.ef-den{height:44px;border-radius:9px;display:flex;align-items:center;justify-content:center;font:800 18px var(--display);font-variant-numeric:tabular-nums;color:#fff;background:var(--bill);box-shadow:inset 0 0 0 2px rgba(255,255,255,.18);text-shadow:0 1px 1px rgba(0,0,0,.35)}
+.ef-den.moneda{width:44px;height:44px;border-radius:50%;justify-self:center;font-size:15px;color:#2A2410;text-shadow:none;background:radial-gradient(circle at 35% 30%,#F1E3A8,#C8A94E 70%,#9C7F2E);box-shadow:inset 0 0 0 2px rgba(0,0,0,.15)}
+.ef-x{color:var(--ink-2);font-weight:700}
+input.ef-q{width:72px}
+.ef-sub{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}

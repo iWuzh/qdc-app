@@ -214,6 +214,7 @@ function login() {
 
 // ---------- Inicio ----------
 function inicio() {
+  if (S.vista.contar) return contarEfectivo();
   const nombre = S.sesion.nombre.split(" ")[0];
   header("Quesos Don Carlos", "Hola, " + nombre, false);
   const v = S.vista;
@@ -240,7 +241,8 @@ function inicio() {
     ${avisoSinResponsable()}
     ${avisos.length ? `<button class="banner" id="verAvisos" style="text-align:left;border:0;width:100%;cursor:pointer">⚠️ ${avisos.length} aviso${avisos.length > 1 ? "s" : ""} con el proveedor: ${esc(avisos[0])} ›</button>` : ""}
     ${S.cuentas && S.cuentas.caja ? `<div class="stat"><div class="k">Caja (efectivo)</div><div class="v">${fmt(S.cuentas.caja.efectivo)}</div>
-      <div class="hint">Cobrado − pagado a proveedores − gastos. Lo mismo que <b>caja</b> en el bot.</div></div>` : ""}
+      <div class="hint">Cobrado − pagado a proveedores − gastos. Lo mismo que <b>caja</b> en el bot.</div>
+      <button class="go alt" id="contarEf" style="margin-top:10px;width:100%">💵 Contar efectivo</button></div>` : `<button class="go alt" id="contarEf">💵 Contar efectivo</button>`}
     <div class="stats">
       <div class="stat"><div class="k">Nos deben</div><div class="v">${S.cuentas ? fmt(nosDeben) : "—"}</div></div>
       <div class="stat"><div class="k">Le debemos</div><div class="v">${S.cuentas ? fmt(debemos) : "—"}</div></div>
@@ -253,6 +255,7 @@ function inicio() {
   const ve = $("#verErr"); if (ve) ve.onclick = () => ir("inicio", { errores: true });
   const va = $("#verAvisos"); if (va) va.onclick = () => ir("cuentas", { lado: "pagar" });
   const bs = $("#bolasSinRec"); if (bs) bs.onclick = () => ir("recibir", { modoInicial: "bolas" });
+  $("#contarEf").onclick = () => ir("inicio", { contar: true });
   cablearSinResponsable();
   $("#salir").onclick = () => {
     if (S.cola.length) { toast("Hay registros sin enviar. Espera a tener señal antes de salir."); return; }
@@ -343,11 +346,43 @@ const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ
 const mismaLinea = (l, p, pr, s) => norm(l.producto) === norm(p) && norm(l.presentacion) === norm(pr) && norm(l.sabor) === norm(s);
 const idDe = k => "q" + Array.from(k).reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36);
 
+// Quesos por libra: una línea de peso por cada pieza (barra o media barra).
+// La cantidad (➖/➕) es el número de piezas; l.piezas guarda el peso de cada
+// una y l.libras es la suma, que es lo que se manda (el Sheet no cambia). Si
+// falta pesar una pieza, l.libras queda vacío y no deja guardar.
+const MAX_PIEZAS = 40;
+function piezasDe(l) {
+  const n = Math.min(MAX_PIEZAS, Math.max(1, Math.round(num(l.cantidad))));
+  if (!Array.isArray(l.piezas)) l.piezas = num(l.libras) > 0 && n === 1 ? [String(l.libras)] : [];
+  while (l.piezas.length < n) l.piezas.push("");
+  if (l.piezas.length > n) l.piezas.length = n;
+  return l.piezas;
+}
+function sumarPiezas(l) {
+  const pz = l.piezas || [];
+  const lb = Math.round(pz.reduce((a, w) => a + num(w), 0) * 1000) / 1000;
+  l.libras = pz.length && pz.every(w => num(w) > 0) ? String(lb) : "";
+  return lb;
+}
+function normalizarPeso(l) { if (num(l.cantidad) > 0) { piezasDe(l); sumarPiezas(l); } }
+// Una pieza que pesa menos de la mitad o más del doble que las demás (con 3+ pesadas): ¿error de dedo?
+function piezasRaras(pz) {
+  const llenas = pz.map(num).filter(w => w > 0);
+  if (llenas.length < 3) return [];
+  return pz.map((w, i) => {
+    const x = num(w); if (!(x > 0)) return -1;
+    const otras = pz.filter((_, j) => j !== i).map(num).filter(y => y > 0).sort((a, b) => a - b);
+    const med = otras[Math.floor(otras.length / 2)];
+    return x < med * 0.5 || x > med * 2 ? i : -1;
+  }).filter(i => i >= 0);
+}
+
 function totalLineas(lineas, dist) {
   let total = 0, faltaPeso = false;
   for (const l of lineas) {
     const q = num(l.cantidad); if (!q) continue;
     const p = prodCat(l.producto);
+    if (p && p.porLibra) normalizarPeso(l);
     if (p && p.porLibra) { const lb = num(l.libras); if (lb > 0) total += lb * precioDe(l.producto, l.presentacion, dist); else faltaPeso = true; }
     else total += q * precioDe(l.producto, l.presentacion, dist);
   }
@@ -364,13 +399,11 @@ function selector(v, dist, esEntrega) {
     const id = idDe(k);
     filas.push({ k, p: p.nombre, pr, s, id });
     const precio = precioDe(p.nombre, pr, dist);
-    const falta = p.porLibra && num(q) > 0 && !(num(l && l.libras) > 0);
     return `<div class="ln" style="${num(q) > 0 ? "" : "opacity:.85"}">
       <div><div class="d">${esc(etiqueta)}</div><div class="x">${precio ? fmt(precio) + (p.porLibra ? "/lb" : " c/u") : ""}${l && l.nota ? ` · ${esc(l.nota)}` : esEntrega && l && l.pedido ? ` · pidió ${l.pedido}` : ""}</div></div>
       <div class="ctl">
         <div class="step"><button data-menos="${esc(k)}" aria-label="Menos">−</button><input class="qty" id="${id}" inputmode="decimal" placeholder="0" value="${esc(num(q) ? q : "")}" data-cant="${esc(k)}" aria-label="Cantidad"><button data-mas="${esc(k)}" aria-label="Más">+</button></div>
-        ${p.porLibra && num(q) > 0 ? `<label class="lb"><input id="${id}lb" class="${falta ? "need" : ""}" inputmode="decimal" placeholder="0.0" value="${esc(l.libras)}" data-lbs="${esc(k)}" aria-label="Libras"><span>lb</span></label>` : ""}
-      </div></div>`;
+      </div></div>${p.porLibra && num(q) > 0 ? bloquePiezas(l, k, id, precio) : ""}`;
   };
   const html = S.catalogo.productos.map(p => {
     const mias = v.lineas.filter(l => norm(l.producto) === norm(p.nombre) && num(l.cantidad) > 0);
@@ -387,13 +420,25 @@ function selector(v, dist, esEntrega) {
       cuerpo = `<div class="lines">${fila(p, "", "", "Cantidad")}</div>`;
     }
     return `<div class="prod ${cuantos ? "on" : ""}">
-      <div class="ph"><div><div class="n">${esc(p.nombre)}</div><div class="p">${cuantos ? "Llevas " + cuantos + (p.porLibra ? " (el precio sale de las libras)" : "") : p.porLibra ? "Por libra" : ""}</div></div></div>
+      <div class="ph"><div><div class="n">${esc(p.nombre)}</div><div class="p">${cuantos ? (p.porLibra ? `Llevas ${cuantos} pieza${cuantos === 1 ? "" : "s"} · el precio sale de las libras` : "Llevas " + cuantos) : p.porLibra ? "Por libra · una línea por pieza" : ""}</div></div></div>
       ${cuerpo}</div>`;
   }).join("");
   // Lo que pidió el cliente pero ya no está en el catálogo (raro): se muestra igual.
   const huerfanas = v.lineas.filter(l => !prodCat(l.producto) && !S.catalogo.productos.some(p => norm(p.nombre) === norm(l.producto)));
   const extra = huerfanas.length ? `<div class="prod on"><div class="n">Otros</div><div class="lines">${huerfanas.map(l => fila({ nombre: l.producto, porLibra: false }, l.presentacion || "", l.sabor || "", descLinea(l))).join("")}</div></div>` : "";
   return { html: `<div class="prods">${html}${extra}</div>`, filas };
+}
+
+function bloquePiezas(l, k, id, precio) {
+  const pz = piezasDe(l), lb = sumarPiezas(l);
+  const faltan = pz.filter(w => !(num(w) > 0)).length, raras = piezasRaras(pz);
+  const lbTxt = (Math.round(lb * 100) / 100).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return `<div class="pzs">
+    <div class="pzt"><span><b>${pz.length} pieza${pz.length === 1 ? "" : "s"}</b> · ${lbTxt} lb${precio && lb ? " · " + fmt(lb * precio) : ""}</span>
+      ${faltan ? `<span class="pzf">⚖️ falta${faltan === 1 ? "" : "n"} ${faltan}</span>` : `<span class="pzok">✓ pesadas</span>`}</div>
+    <div class="pzg">${pz.map((w, i) => `<label class="pz${num(w) > 0 ? "" : " need"}${raras.includes(i) ? " raro" : ""}"><span>${i + 1}</span><input id="${id}p${i}" inputmode="decimal" enterkeyhint="next" placeholder="0.00" value="${esc(w)}" data-pz="${esc(k)}" data-i="${i}" aria-label="Pieza ${i + 1}, libras"><em>lb</em></label>`).join("")}</div>
+    ${raras.length ? `<div class="hint warn">⚠️ La pieza ${raras.map(i => i + 1).join(" y ")} pesa muy distinto a las otras. ¿Está bien escrita?</div>` : ""}
+  </div>`;
 }
 
 function cablearSelector(v, filas, redibujar, esEntrega) {
@@ -408,7 +453,11 @@ function cablearSelector(v, filas, redibujar, esEntrega) {
   $$("[data-menos]").forEach(b => b.onclick = () => { const l = linea(buscar(b.dataset.menos), false); if (!l) return; l.cantidad = Math.max(0, num(l.cantidad) - 1); limpiar(l); redibujar(); });
   $$("[data-cant]").forEach(inp => inp.oninput = () => { const l = linea(buscar(inp.dataset.cant), true); l.cantidad = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
   $$("[data-cant]").forEach(inp => inp.onblur = () => { const l = linea(buscar(inp.dataset.cant), false); if (l && !num(l.cantidad)) { limpiar(l); redibujar(); } });
-  $$("[data-lbs]").forEach(inp => inp.oninput = () => { const l = linea(buscar(inp.dataset.lbs), true); l.libras = inp.value.replace(/[^0-9.,]/g, ""); conFoco(redibujar); });
+  $$("[data-pz]").forEach(inp => {
+    inp.oninput = () => { const l = linea(buscar(inp.dataset.pz), true); piezasDe(l)[+inp.dataset.i] = inp.value.replace(/[^0-9.,]/g, ""); sumarPiezas(l); conFoco(redibujar); };
+    // Enter (o "Siguiente") pasa a la próxima pieza: se pesa y se escribe sin soltar la balanza.
+    inp.onkeydown = e => { if (e.key !== "Enter") return; e.preventDefault(); const sig = document.getElementById(inp.id.replace(/p(\d+)$/, (_, n) => "p" + (+n + 1))); if (sig) sig.focus(); else inp.blur(); };
+  });
   $$("[data-abrir]").forEach(b => b.onclick = () => { const [p, pr] = b.dataset.abrir.split("|"); v.abierto[p] = pr; redibujar(); });
 }
 
