@@ -99,6 +99,19 @@ function aplicarLocal(reg) {
       guardar("compras", S.compras);
     }
   }
+  // Recibir: lo recién anotado cuenta como "ya llegó" al momento (sin señal
+  // también), para que la pantalla no vuelva a ofrecer lo mismo.
+  if (S.compras && reg.tipo === "recepcion") {
+    for (const i of reg.items || []) {
+      const it = S.compras.items.find(x => mismaLinea(x, i.producto, i.presentacion, i.sabor));
+      if (it) { it.recibido = num(it.recibido) + num(i.cantidad); continue; }
+      const otros = S.compras.otros || (S.compras.otros = []);
+      const o = otros.find(x => mismaLinea(x, i.producto, i.presentacion, i.sabor));
+      if (o) o.recibido = num(o.recibido) + num(i.cantidad);
+      else otros.push({ producto: i.producto, presentacion: i.presentacion || "", sabor: i.sabor || "", recibido: num(i.cantidad) });
+    }
+    guardar("compras", S.compras);
+  }
   if (reg.tipo === "stock" && S.stock) moverLocal(reg.socio, reg.items, reg.movimiento === "entrada" ? 1 : -1);
   if (reg.tipo === "stock" && S.stock && reg.movimiento === "traspaso") moverLocal(reg.destino, reg.items, 1);
   if (reg.desdeStock && S.stock) moverLocal(reg.desdeStock, (reg.items || []).map(i => Object.assign({}, i, { cantidad: i.libras != null ? i.libras : i.cantidad })), -1);
@@ -609,10 +622,19 @@ function recibir() {
   const { total, faltaPeso, hay } = totalLineas(v.lineas, "compra");
   const sel = selector(v, "compra", true);
   const sinFac = S.cuentas ? S.cuentas.pagar.reduce((a, p) => a + p.sinFactura.length, 0) : 0;
+  const llego = yaLlego(), pendientes = v.lineas.some(l => l.falta > 0);
   $("#screen").innerHTML = `
     <button class="act" id="irLista" style="min-height:0;flex-direction:row;align-items:center;width:100%"><svg viewBox="0 0 24 24"><path d="M3 4h2l2.5 11h11L21 7H7"/><circle cx="9" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg><div><div class="t" style="font-size:17px">Lista de compras</div><div class="d">Lo pedido esta semana, para mandarlo por WhatsApp</div></div></button>
     <div class="seg"><button data-modo="todo" aria-pressed="${v.modo === "todo"}">Todo lo pedido</button><button data-modo="bolas" aria-pressed="${v.modo === "bolas"}">Solo bolas (jueves)</button></div>
-    <div class="hint">${S.compras ? `Viene cargado con lo que falta por llegar de lo pedido la semana del ${fecha(S.compras.pedidosDe)}. Corrige lo que llegó distinto y agrega lo que no se pidió.` : "Sin la lista de lo pedido (hace falta señal una vez). Anota lo que llegó."}</div>
+    ${llego.length ? `<div class="label">Ya llegó esta semana</div>
+    <div class="card">${llego.map(it => { const p = prodCat(it.producto), lb = p && p.porLibra, r = cantTxt({ q: Math.round(it.recibido * 100) / 100 });
+      const txt = lb ? `${r} lb${it.pedido ? " · pidieron " + it.pedido : ""}` : it.pedido ? `${r} de ${it.pedido}` : `${r} · no se pidió`;
+      return `<div class="line"><span>${esc(descLinea(it))}</span><span>${txt}${lb || (it.pedido && it.recibido >= it.pedido) ? " ✅" : ""}</span></div>`; }).join("")}</div>
+    <div class="label">Falta por llegar</div>` : ""}
+    <div class="hint">${!S.compras ? "Sin la lista de lo pedido (hace falta señal una vez). Anota lo que llegó."
+      : v.enCero ? `Ya hay una recepción anotada esta semana, por eso lo que falta viene en 0. Anota lo que vaya llegando${pendientes ? ", o carga todo lo que falta de una vez" : ""}.`
+      : `Viene cargado con lo que falta por llegar de lo pedido la semana del ${fecha(S.compras.pedidosDe)}. Corrige lo que llegó distinto y agrega lo que no se pidió.`}</div>
+    ${v.enCero && pendientes ? `<button class="add" id="cargarFalta">Cargar lo que falta</button>` : ""}
     ${sel.html}
     ${faltaPeso ? `<div class="hint warn">⚖️ Los quesos por libra se reciben por las libras de la balanza, no por las barras.</div>` : ""}
     <div class="confirm">
@@ -622,6 +644,7 @@ function recibir() {
     <button class="act" id="irFactura" style="min-height:0;flex-direction:row;align-items:center;width:100%;margin-top:12px"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg><div><div class="t" style="font-size:17px">Anotar factura de Ligui</div><div class="d">${sinFac ? sinFac + " semana" + (sinFac > 1 ? "s" : "") + " esperando factura" : "Llega el domingo después del jueves"}</div></div></button>`;
   $$("[data-modo]").forEach(b => b.onclick = () => { precargarRecibir(v, b.dataset.modo); recibir(); });
   cablearSelector(v, sel.filas, recibir, true);
+  const cf = $("#cargarFalta"); if (cf) cf.onclick = () => { precargarRecibir(v, v.modo, true); recibir(); };
   $("#irFactura").onclick = () => ir("recibir", { factura: true });
   $("#irLista").onclick = () => ir("recibir", { lista: true });
   $("#guardarRec").onclick = () => {
@@ -636,17 +659,29 @@ function recibir() {
   };
 }
 
-function precargarRecibir(v, modo) {
+// Lo que ya llegó esta semana: lo pedido con algo recibido + lo que llegó sin pedirse.
+function yaLlego() {
+  if (!S.compras) return [];
+  return S.compras.items.filter(it => it.recibido > 0).concat((S.compras.otros || []).map(o => Object.assign({ pedido: 0 }, o)));
+}
+
+// Sin recepción esta semana: viene cargado con todo lo pedido (el domingo se
+// recibe casi todo de una vez). Con una recepción ya anotada: lo que falta viene
+// EN 0 con la nota de cuánto falta, para que un toque en Guardar no registre
+// otra vez lo que no ha llegado; "Cargar lo que falta" lo llena (cargar = true).
+function precargarRecibir(v, modo, cargar) {
   v.modo = modo;
+  const hayRec = yaLlego().length > 0;
+  v.enCero = hayRec && !cargar;
   const items = (S.compras ? S.compras.items : []).filter(it => modo === "todo" || norm(it.producto) === "bolas de queso");
   v.lineas = items.map(it => {
     const p = prodCat(it.producto), lb = p && p.porLibra;
     // Por libra se pide en barras y se recibe en libras: no se puede restar.
     const falta = lb ? (it.recibido > 0 ? 0 : it.pedido) : Math.max(0, Math.round((it.pedido - it.recibido) * 100) / 100);
-    const ya = Math.round(it.recibido * 100) / 100;
-    return { producto: it.producto, presentacion: it.presentacion, sabor: it.sabor, cantidad: falta, libras: "", pedido: it.pedido,
-             nota: `pidieron ${it.pedido}${ya ? " · ya llegó " + ya + (lb ? " lb" : "") : ""}` };
-  }).filter(l => l.cantidad > 0 || modo === "bolas");
+    const nota = !hayRec ? `pidieron ${it.pedido}` : !falta ? `ya llegó todo · pidieron ${it.pedido}`
+      : it.recibido > 0 ? `faltan ${falta} de ${it.pedido}` : `no ha llegado · pidieron ${it.pedido}`;
+    return { producto: it.producto, presentacion: it.presentacion, sabor: it.sabor, cantidad: v.enCero ? 0 : falta, falta, libras: "", pedido: it.pedido, nota };
+  }).filter(l => l.falta > 0 || modo === "bolas");
   if (modo === "bolas" && !v.lineas.length) v.lineas = [{ producto: "Bolas de queso", presentacion: "", sabor: "", cantidad: 0, libras: "", pedido: 1, nota: "" }];
 }
 
