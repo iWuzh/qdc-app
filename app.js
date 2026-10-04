@@ -142,9 +142,12 @@ async function refrescar() {
   try {
     // Las consultas van a la vez; cada una pinta apenas llega.
     const hoy = hoyIso();
-    const pedirCatalogo = !S.catalogo || leer("catalogoDia", "") !== hoy;
+    // Catálogo (productos, clientes, precios): cada hora o al tocar "actualizar".
+    // Antes era una vez al día y un cambio en Clientes (Lucy/Moreno, 3-oct) tardaba hasta mañana.
+    const pedirCatalogo = !S.catalogo || S.forzarCatalogo || Date.now() - leer("catalogoHora", 0) > 3600e3;
+    S.forzarCatalogo = false;
     await Promise.all([
-      pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); repintar(); } }),
+      pedirCatalogo && llamar({ accion: "catalogo" }).then(ca => { if (ca.ok) { S.catalogo = ca.catalogo; guardar("catalogo", S.catalogo); guardar("catalogoDia", hoy); guardar("catalogoHora", Date.now()); repintar(); } }),
       llamar({ accion: "ruta" }).then(ru => { if (ru.ok) { S.ruta = ru.ruta; guardar("ruta", S.ruta); repintar(); } }),
       llamar({ accion: "cuentas" }).then(cu => { if (cu.ok) { S.cuentas = { cobrar: cu.cobrar, pagar: cu.pagar, caja: cu.caja }; guardar("cuentas", S.cuentas); repintar(); } }),
       llamar({ accion: "compras" }).then(co => { if (co.ok) { S.compras = co.compras; guardar("compras", S.compras); repintar(); } }),
@@ -995,7 +998,7 @@ $("#back").onclick = () => {
   if (S.tab === "inicio" && v.contar === "monto" && v.para) return ir("inicio", Object.assign({}, v.para));
   ir("inicio");
 };
-$("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); sincronizar(); } };
+$("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); S.forzarCatalogo = true; sincronizar(); } };
 window.addEventListener("online", () => { S.enLinea = true; sincronizar(); });
 window.addEventListener("offline", () => { S.enLinea = false; pintarSync(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) sincronizar(); });
