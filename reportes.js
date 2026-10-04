@@ -22,7 +22,7 @@ const repSem = iso => { const d = new Date(iso + "T12:00:00"); return `${d.getDa
 
 // ---------- Gráfico de líneas (una escala, N series) ----------
 // series: [{ nombre, color, valores: [n|null] }]; etiquetas: textos del eje X.
-function repLineas(id, etiquetas, series, fmtY) {
+function repLineas(id, etiquetas, series, fmtY, opts) {
   const W = 340, H = 190, L = 40, R = 10, T = 14, B = 24;
   const vals = series.flatMap(s => s.valores).filter(v => v != null);
   if (!vals.length) return `<div class="hint">Todavía no hay datos.</div>`;
@@ -60,8 +60,10 @@ function repLineas(id, etiquetas, series, fmtY) {
   g += series.map((s, k) => `<circle id="${id}-p${k}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>`).join("");
   const leyenda = series.length > 1 ? `<div class="rep-ley">${series.map(s => `<span><i style="background:${s.color}"></i>${esc(s.nombre)}</span>`).join("")}</div>` : "";
   REP_GRAF[id] = { etiquetas, series, x, y, W, L, R };
-  return `${leyenda}<div class="rep-lectura" id="${id}-lee" aria-live="polite">Toca el gráfico para ver cada semana</div>
-    <svg class="rep-svg" id="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map(s => s.nombre).join(" y "))} por semana">${g}</svg>`;
+  const lectura = `<div class="rep-lectura" id="${id}-lee" aria-live="polite">Toca el gráfico para ver cada semana</div>`;
+  const svg = `<svg class="rep-svg" id="${id}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(series.map(s => s.nombre).join(" y "))} por semana">${g}</svg>`;
+  // opts.leyendaAbajo: la leyenda debajo del gráfico (Libras, pedido de Marcos 3-oct).
+  return opts && opts.leyendaAbajo ? `${lectura}${svg}${leyenda}` : `${leyenda}${lectura}${svg}`;
 }
 const REP_GRAF = {};
 function repPasoLindo(bruto) {
@@ -323,7 +325,7 @@ function repSeriesProductos(r, gs) {
     }
     return `<div class="card">
       <div class="line"><b>${m.t}</b><span class="hint">${series.length === 1 ? esc(series[0].nombre) : m.d}</span></div>
-      ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)))}
+      ${repLineas("gUom" + (m.u || "u"), et, series, v => String(Math.round(v)), { leyendaAbajo: m.u === "lb" })}
     </div>`;
   }).join("");
   return `<div class="label">Lo vendido por semana</div>
