@@ -718,7 +718,12 @@ function factura() {
   const provs = S.cuentas ? S.cuentas.pagar : [];
   v.prov = v.prov || (provs[0] && provs[0].proveedor);
   const p = provs.find(x => x.proveedor === v.prov);
-  const semana = semanaDeFactura();
+  // La semana sale sola por el día (dom-mié = la que cerró, jue-sáb = la en curso),
+  // pero si llega una factura atrasada se escoge cualquier semana que esté esperando.
+  const auto = semanaDeFactura();
+  const semana = v.semana || auto;
+  const esperando = p ? p.sinFactura.map(x => x.semana) : [];
+  const opciones = [...new Set(esperando.concat([auto, semana]))].sort().reverse();
   const dom = new Date(semana + "T12:00:00"), jue = new Date(dom); jue.setDate(jue.getDate() + 4);
   header("Factura de " + (v.prov || "proveedor"), `Semana del ${fecha(semana)} (dom ${dom.getDate()} + jue ${jue.getDate()})`, true);
   if (!p) { $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando cuentas…" : "Hace falta señal una vez para bajar las cuentas."}</div>`; return; }
@@ -729,6 +734,9 @@ function factura() {
   if (!sem.items.length && !yaTiene) avisos.unshift(`No hay nada recibido en la semana del ${fecha(semana)}. Anota primero lo que llegó.`);
   $("#screen").innerHTML = `
     ${provs.length > 1 ? `<div class="chips">${provs.map(x => `<button class="chip sm" data-prov="${esc(x.proveedor)}" aria-pressed="${x.proveedor === v.prov}">${esc(x.proveedor)}</button>`).join("")}</div>` : ""}
+    <div class="label">¿De qué semana es la factura?</div>
+    <div class="chips">${opciones.map(w => { const sf = p.sinFactura.find(x => x.semana === w); return `<button class="chip sm" data-sem="${w}" aria-pressed="${w === semana}">${fecha(w)}${sf ? " · " + fmt(sf.total) : ""}${w === auto ? " (esta)" : ""}</button>`; }).join("")}</div>
+    <div class="hint">Las semanas con monto son las que tienen mercancía recibida esperando factura.</div>
     ${yaTiene ? `<div class="banner bad">Ya hay una factura de ${fmt(yaTiene.total)} para esta semana (anotada el ${fecha(yaTiene.fecha)}). Si esta es otra, revísalo antes de guardar.</div>` : ""}
     <div class="card"><div style="overflow-x:auto"><table class="tabla">
       <thead><tr><th>Recibido</th><th>Cant.</th><th>Subtotal</th></tr></thead><tbody>
@@ -741,6 +749,7 @@ function factura() {
     <div class="hint">La diferencia no bloquea: se guarda igual y el aviso queda para revisarlo. Buena práctica: manda la foto de la factura de Bululú al grupo.</div>
     <div class="btns"><button class="go" id="facOk" ${m > 0 ? "" : "disabled"}>Guardar factura</button></div>`;
   $$("[data-prov]").forEach(b => b.onclick = () => { v.prov = b.dataset.prov; factura(); });
+  $$("[data-sem]").forEach(b => b.onclick = () => { v.semana = b.dataset.sem; factura(); });
   $("#facMonto").oninput = e => { v.monto = e.target.value.replace(/[^0-9.,]/g, ""); conFoco(factura); };
   $("#facOk").onclick = () => {
     encolar({ tipo: "factura", proveedor: v.prov, monto: m, semana });
