@@ -20,6 +20,14 @@ const nuevoId = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toSt
 const guardar = (k, v) => { try { localStorage.setItem("qdc." + k, JSON.stringify(v)); } catch (e) {} };
 const leer = (k, def) => { try { const v = localStorage.getItem("qdc." + k); return v == null ? def : JSON.parse(v); } catch (e) { return def; } };
 
+// Si la app cambió de servidor (prueba -> producción), lo bajado del otro Sheet
+// no sirve: se borra para que no se mezcle. Se quedan la sesión, lo que falta
+// por enviar (cola) y los borradores del efectivo.
+if (leer("ambiente", "prueba") !== window.QDC_CONFIG.AMBIENTE) {
+  ["catalogo", "catalogoDia", "ruta", "cuentas", "stock", "compras", "recibido", "reportes", "reportesHora", "actualizado"].forEach(k => { try { localStorage.removeItem("qdc." + k); } catch (e) {} });
+  guardar("ambiente", window.QDC_CONFIG.AMBIENTE);
+}
+
 const S = {
   sesion: leer("sesion", null),          // {pin, nombre}
   catalogo: leer("catalogo", null),
