@@ -6,6 +6,7 @@
 "use strict";
 
 const MOV = {
+  traspaso: { t: "Pasar a otro socio", d: "Se la das a otro socio · no se cobra" },
   se_quedo: { t: "Vendió", d: "Paga a precio Contado (o lo que cobró)" },
   perdida: { t: "Se perdió", d: "Paga al costo" },
   desecho: { t: "Desecho", d: "Se dañó · no se cobra" },
@@ -68,7 +69,7 @@ function stock() {
     <button class="go ${its.length ? "alt" : ""}" id="contar">Contar ${esMio ? "mi" : "el"} stock${esMio ? "" : " de " + esc(v.socio)}</button>
     <div class="hint">Para entregarle a un cliente de la lista desde este stock: en <b>Entregas</b> o <b>Entregar pedido</b>, elige "Del stock de ${esc(v.socio)}". El cliente queda debiendo.</div>
     ${s.movimientos && s.movimientos.length ? `<div class="label">Desde el último conteo</div>
-      <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
+      <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo === "Traspaso" ? "Pasó a otro socio" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
   cablearChipsStock();
   cablearSinResponsable();
   const vd = $("#verDeuda"); if (vd) vd.onclick = () => ir("cuentas", { lado: "cobrar", quien: deudaCliente(v.socio).cliente });
@@ -89,15 +90,23 @@ function stockMovimiento() {
     if (v.mov === "perdida") total += precioUnit(it, "costo") * num(l.cantidad);
   }
   const hay = v.lineas.some(l => num(l.cantidad) > 0);
+  const esPaso = v.mov === "traspaso";
+  const otros = esPaso ? ((S.catalogo && S.catalogo.socios) || stockSocios().map(x => x.socio)).filter(n => norm(n) !== norm(v.socio)) : [];
   $("#screen").innerHTML = `
+    ${esPaso ? `<div class="label">¿A quién se la pasas?</div>
+      <div class="chips">${otros.map(n => `<button class="chip" data-dest="${esc(n)}" aria-pressed="${v.destino === n}">${esc(n)}</button>`).join("")}</div>
+      <div class="label">¿Qué le pasas?</div>` : ""}
     <div class="rows">${its.map((it, i) => { const l = linea(it) || {}; return `<div class="row" style="display:block">
       <div class="line"><b>${esc(descItem(it))}</b><span class="hint">tiene ${cantTxt2(it.cantidad, it.u)}</span></div>
       <div class="ctl" style="margin-top:8px"><div class="step"><button data-menos="${i}">−</button><input class="qty" id="mq${i}" inputmode="decimal" placeholder="0" value="${esc(num(l.cantidad) ? l.cantidad : "")}" data-q="${i}"><button data-mas="${i}">+</button></div>
       ${v.mov === "se_quedo" && num(l.cantidad) ? `<label class="monto" style="margin-top:8px"><span>RD$ c/u</span><input id="mp${i}" inputmode="decimal" value="${esc(l.precio != null && l.precio !== "" ? l.precio : precioUnit(it, "contado"))}" data-p="${i}"></label>` : ""}</div></div>`; }).join("")}</div>
     ${excede ? `<div class="banner bad">No puede salir más de lo que ${esc(v.socio)} tiene.</div>` : ""}
     ${hay && !excede ? `<div class="efecto">${v.mov === "se_quedo" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b>${total < lista - 0.005 ? ` (descuento de ${fmt(lista - total)} sobre el precio Contado)` : ""}.`
-      : v.mov === "perdida" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b> (al costo).` : "No se cobra. Queda anotado a nombre de " + esc(v.socio) + "."}</div>` : ""}
-    <div class="btns"><button class="go" id="movOk" ${hay && !excede ? "" : "disabled"}>Guardar</button></div>`;
+      : v.mov === "perdida" ? `${esc(v.socio)} queda debiendo <b>${fmt(total)}</b> (al costo).`
+      : esPaso ? (v.destino ? `Sale del stock de ${esc(v.socio)} y entra al de <b>${esc(v.destino)}</b>. No se cobra: desde ahora responde ${esc(v.destino)}.` : "Elige a quién se la pasas.")
+      : "No se cobra. Queda anotado a nombre de " + esc(v.socio) + "."}</div>` : ""}
+    <div class="btns"><button class="go" id="movOk" ${hay && !excede && (!esPaso || v.destino) ? "" : "disabled"}>${esPaso && v.destino ? "Pasar a " + esc(v.destino) : "Guardar"}</button></div>`;
+  $$("[data-dest]").forEach(b => b.onclick = () => { v.destino = b.dataset.dest; stockMovimiento(); });
   const get = i => { let l = linea(its[i]); if (!l) { l = { producto: its[i].producto, presentacion: its[i].variante, sabor: its[i].sabor, cantidad: 0, precio: "" }; v.lineas.push(l); } return l; };
   $$("[data-mas]").forEach(b => b.onclick = () => { const l = get(+b.dataset.mas); l.cantidad = Math.min(its[+b.dataset.mas].cantidad, num(l.cantidad) + 1); stockMovimiento(); });
   $$("[data-menos]").forEach(b => b.onclick = () => { const l = get(+b.dataset.menos); l.cantidad = Math.max(0, num(l.cantidad) - 1); stockMovimiento(); });
@@ -109,8 +118,8 @@ function stockMovimiento() {
       if (v.mov === "se_quedo" && l.precio !== "" && l.precio != null) it.precio = num(l.precio);
       return it;
     });
-    encolar({ tipo: "stock", movimiento: v.mov, socio: v.socio, items });
-    toast(`✅ ${m.t} · ${v.socio}`);
+    encolar(Object.assign({ tipo: "stock", movimiento: v.mov, socio: v.socio, items }, esPaso ? { destino: v.destino } : {}));
+    toast(esPaso ? `✅ Pasó de ${v.socio} a ${v.destino}` : `✅ ${m.t} · ${v.socio}`);
     ir("stock", { socio: v.socio });
   };
 }
@@ -298,7 +307,7 @@ function tablaSocio(res) {
   return `<div class="rc-head rc-5"><span></span><span>Tenía</span><span>Entró</span><span>Vendió</span><span>Otras</span><span>Tiene</span></div>
     ${res.map(r => `<div class="rc-row rc-5"><span class="rc-n">${esc(descItem(r))}</span><span>${nq(r.tenia, r.u)}</span><span>${nq(r.entro, r.u)}</span>
       <span>${nq(r.vendio, r.u)}</span><span>${nq(r.otras, r.u)}</span><b>${nq(r.tiene, r.u)}</b></div>`).join("")}
-    <div class="hint">Tenía = el último conteo. Vendió = a clientes desde su stock o "Vendió". Otras = se perdió, desecho y promo.</div>`;
+    <div class="hint">Tenía = el último conteo. Vendió = a clientes desde su stock o "Vendió". Otras = se perdió, desecho, promo y lo que pasó a otro socio.</div>`;
 }
 
 // ---------- 📦 Recibido: lo que llegó en la semana y a dónde fue ----------

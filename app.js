@@ -100,6 +100,7 @@ function aplicarLocal(reg) {
     }
   }
   if (reg.tipo === "stock" && S.stock) moverLocal(reg.socio, reg.items, reg.movimiento === "entrada" ? 1 : -1);
+  if (reg.tipo === "stock" && S.stock && reg.movimiento === "traspaso") moverLocal(reg.destino, reg.items, 1);
   if (reg.desdeStock && S.stock) moverLocal(reg.desdeStock, (reg.items || []).map(i => Object.assign({}, i, { cantidad: i.libras != null ? i.libras : i.cantidad })), -1);
   if (reg.tipo === "conteo" && S.stock) {
     const s = socioStock(reg.socio);
@@ -335,7 +336,7 @@ function describir(r) {
   if (r.tipo === "gasto") return `Gasto ${r.descripcion} · ${fmt(r.monto)}`;
   if (r.tipo === "ajuste_caja") return `Ajuste de caja a ${fmt(r.contado)} · ${r.motivo}`;
   if (r.tipo === "factura") return `Factura de ${r.proveedor} (semana del ${fecha(r.semana)}) · ${fmt(r.monto)}`;
-  if (r.tipo === "stock") return `${(MOV[r.movimiento] || {}).t || r.movimiento} · ${r.socio}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
+  if (r.tipo === "stock") return `${(MOV[r.movimiento] || {}).t || r.movimiento} · ${r.socio}${r.destino ? " → " + r.destino : ""}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
   if (r.tipo === "conteo") return `Conteo de ${r.socio}`;
   if (r.tipo === "recepcion") return "Recibido: " + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
   return `${{ pedido: "Pedido", venta: "Venta", entrega: "Entrega" }[r.tipo]} de ${r.cliente}: ` + (r.items || []).map(i => `${i.cantidad} ${i.producto}`).join(", ");
