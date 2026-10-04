@@ -54,9 +54,11 @@ function stock() {
   v.socio = v.socio || miSocio() || stockSocios()[0].socio;
   const s = socioStock(v.socio), its = itemsDe(v.socio), esMio = norm(v.socio) === norm(miSocio());
   const res = s.resumen || [];
+  const debe = deudaSocio(v.socio);
   $("#screen").innerHTML = `
     ${avisoSinResponsable()}
     ${chipsStock(v)}
+    ${debe > 0.005 ? `<button class="banner" id="verDeuda" style="text-align:left;border:0;width:100%;cursor:pointer">💰 ${esMio ? "Le debes" : esc(v.socio) + " le debe"} a QDC <b>${fmt(debe)}</b> (de su stock). Ver ›</button>` : ""}
     <div class="card">
       <div class="k" style="font-weight:700">${esMio ? "Lo que tienes" : "Lo que tiene " + esc(v.socio)}${s.conteo ? ` <span class="hint">· contado el ${fecha(s.conteo)}</span>` : ""}</div>
       ${res.length ? tablaSocio(res) : its.map(it => `<div class="line"><span>${esc(descItem(it))}</span><b>${cantTxt2(it.cantidad, it.u)}</b></div>`).join("") || `<div class="hint">Nada en stock.</div>`}
@@ -69,6 +71,7 @@ function stock() {
       <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
   cablearChipsStock();
   cablearSinResponsable();
+  const vd = $("#verDeuda"); if (vd) vd.onclick = () => ir("cuentas", { lado: "cobrar", quien: deudaCliente(v.socio).cliente });
   $$("[data-mov]").forEach(b => b.onclick = () => ir("stock", { socio: v.socio, mov: b.dataset.mov, lineas: [] }));
   $("#contar").onclick = () => ir("stock", { socio: v.socio, conteo: true });
 }
@@ -112,9 +115,47 @@ function stockMovimiento() {
   };
 }
 
+// Lo que el socio le debe a QDC: sale de Cuentas (sus "Vendió" y "Se perdió" son entregas a su nombre).
+const deudaCliente = n => ((S.cuentas && S.cuentas.cobrar) || []).find(c => norm(c.cliente) === norm(n)) || { debe: 0, cliente: n };
+const deudaSocio = n => deudaCliente(n).debe;
+
+// ---------- Primer conteo de un socio ----------
+// Su punto de partida: cuenta todo lo que tiene (productos del catálogo, los
+// quesos por pieza con su peso) y no hay nada que explicar. El servidor no pide
+// explicación si el socio nunca había contado (AppStock.js).
+function stockConteoInicial() {
+  const v = S.vista;
+  header("Primer conteo", v.socio, true);
+  if (!S.catalogo) { $("#screen").innerHTML = `<div class="hint">Hace falta señal una vez para bajar la lista de productos.</div>`; return; }
+  v.lineas = v.lineas || [];
+  const { total, faltaPeso, hay } = totalLineas(v.lineas, "compra");
+  const sel = selector(v, "compra", false);
+  $("#screen").innerHTML = `
+    <div class="hint">Cuenta todo lo que ${norm(v.socio) === norm(miSocio()) ? "tienes" : "tiene " + esc(v.socio)} en la mano ahora mismo. Es el punto de partida: desde aquí, lo que entre y salga de su stock queda a su nombre. Los quesos, por pieza con su peso.</div>
+    ${sel.html}
+    ${faltaPeso ? `<div class="hint warn">⚖️ Falta pesar alguna pieza.</div>` : ""}
+    <div class="confirm">
+      <div class="tot"><span class="k">Vale al costo</span><span class="v">${fmt(total)}</span></div>
+      <div class="btns"><button class="go alt" id="conCero">No tiene nada</button><button class="go" id="conOk" ${hay && !faltaPeso ? "" : "disabled"}>Guardar conteo</button></div>
+    </div>`;
+  cablearSelector(v, sel.filas, stockConteoInicial, false);
+  const guardarConteo = items => {
+    encolar({ tipo: "conteo", socio: v.socio, items, explicaciones: [] });
+    toast(`✅ Primer conteo de ${v.socio} guardado`);
+    ir("stock", { socio: S.stock && S.stock.activo ? v.socio : RECIBIDO });
+  };
+  $("#conOk").onclick = () => guardarConteo(v.lineas.filter(l => num(l.cantidad) > 0).map(l => {
+    const p = prodCat(l.producto);
+    return { producto: l.producto, presentacion: l.presentacion || "", sabor: l.sabor || "", cantidad: p && p.porLibra ? num(l.libras) : num(l.cantidad) };
+  }));
+  $("#conCero").onclick = () => guardarConteo([]);
+}
+
 // ---------- Conteo ----------
 function stockConteo() {
   const v = S.vista;
+  const s0 = socioStock(v.socio);
+  if (!(S.stock && S.stock.activo) || !s0 || !s0.conteo) return stockConteoInicial();
   header("Conteo", v.socio, true);
   v.cuenta = v.cuenta || {};   // clave -> contado (texto)
   v.expl = v.expl || {};       // clave -> { se_quedo, perdida, desecho, promo, nota }
@@ -295,9 +336,19 @@ function stockRecibido() {
       : r.items.length ? `<div class="banner ok">✓ Todo lo que llegó tiene dueño: un cliente o un socio.</div>` : ""}
     ${r.items.length ? `<div class="rc-head rc-4"><span></span><span>Llegó</span><span>Clientes</span><span>Socios</span><span>Sin dueño</span></div>
       <div class="rc-lista">${raros.concat(r.items.filter(x => !raros.includes(x))).map(fila).join("")}</div>` : ""}
-    <div class="hint">Llegó = recepciones de la semana (domingo y jueves). Lo que se entrega desde el stock de un socio no cuenta aquí: no salió de lo que llegó.</div>`}`;
+    <div class="hint">Llegó = recepciones de la semana (domingo y jueves). Lo que se entrega desde el stock de un socio no cuenta aquí: no salió de lo que llegó.</div>`}
+    ${sinConteo().length ? `<div class="card"><div class="k" style="font-weight:700">Stock por socio</div>
+      <div class="hint">Arranca con el primer conteo de cada uno: cuenta lo que tiene en la mano y desde ahí todo queda a su nombre.</div>
+      <div class="chips">${sinConteo().map(n => `<button class="chip" data-primer="${esc(n)}">Contar ${esc(n)}</button>`).join("")}</div></div>` : ""}`;
+  $$("[data-primer]").forEach(b => b.onclick = () => ir("stock", { socio: b.dataset.primer, conteo: true }));
   cablearChipsStock();
   if (S.stock && S.stock.activo) cablearSinResponsable();
   $("#rcAnt").onclick = () => r && ir("stock", { socio: RECIBIDO, semana: isoMas(r.semana, -7) });
   $("#rcSig").onclick = () => r && ir("stock", { socio: RECIBIDO, semana: isoMas(r.semana, 7) === (S.recibido.actual || {}).semana ? "" : isoMas(r.semana, 7) });
+}
+
+// Socios que todavía no tienen su primer conteo (los socios salen del catálogo).
+function sinConteo() {
+  const todos = (S.catalogo && S.catalogo.socios) || [];
+  return todos.filter(n => { const x = socioStock(n); return !(S.stock && S.stock.activo) || !x || !x.conteo; });
 }

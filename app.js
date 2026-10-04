@@ -836,12 +836,21 @@ function cuentas() {
   const alDia = filas.filter(x => x.c.debe <= 0.005 && !(cobrar && fantasma(x.c))).map(x => Object.assign(x, cobrar ? { tot: vendidoDesde(x.c), prom: vendidoDesde(x.c) / semanasCorte } : {}))
     .sort((a, b) => cobrar ? b.prom - a.prom : 0);
   const total = conDeuda.reduce((a, x) => a + x.c.debe, 0);
+  // Los socios (lo que "vendieron" o se perdió de su stock) van aparte de los clientes.
+  const esSocio = n => cobrar && ((S.catalogo && S.catalogo.socios) || []).some(s => norm(s) === norm(n));
+  const deCliente = conDeuda.filter(x => !esSocio(x.n)), deSocio = conDeuda.filter(x => esSocio(x.n));
+  const totSocios = deSocio.reduce((a, x) => a + x.c.debe, 0);
+  const filaDeuda = x => { const a = analizar(docsDe(x.c, cobrar), x.c.pagos); return `
+      <button class="row" data-q="${esc(x.n)}"><div><div style="font-weight:700">${esc(x.n)}</div><div class="s">${a.abiertas.length} factura${a.abiertas.length === 1 ? "" : "s"} abierta${a.abiertas.length === 1 ? "" : "s"}${a.abiertas.length ? " · la más vieja " + diasTxt(a.dias) : ""}</div></div><div class="r">${fmt(x.c.debe)} ›</div></button>`; };
   header(cobrar ? "Cobros pendientes" : "Deudas pendientes", actualizadoTxt(), true);
   $("#screen").innerHTML = `
     <div class="seg"><button data-lado="cobrar" aria-pressed="${cobrar}">Cobros pendientes</button><button data-lado="pagar" aria-pressed="${!cobrar}">Deudas pendientes</button></div>
-    <div class="stat"><div class="k">${cobrar ? "Total por cobrar" : "Total por pagar"}</div><div class="v">${fmt(total)}</div></div>
-    <div class="rows">${conDeuda.map(x => { const a = analizar(docsDe(x.c, cobrar), x.c.pagos); return `
-      <button class="row" data-q="${esc(x.n)}"><div><div style="font-weight:700">${esc(x.n)}</div><div class="s">${a.abiertas.length} factura${a.abiertas.length === 1 ? "" : "s"} abierta${a.abiertas.length === 1 ? "" : "s"}${a.abiertas.length ? " · la más vieja " + diasTxt(a.dias) : ""}</div></div><div class="r">${fmt(x.c.debe)} ›</div></button>`; }).join("") || `<div class="row">${cobrar ? "Nadie nos debe nada 🎉" : "No le debemos nada a nadie 🎉"}</div>`}</div>
+    <div class="stat"><div class="k">${cobrar ? "Total por cobrar" : "Total por pagar"}</div><div class="v">${fmt(total)}</div>${totSocios > 0.005 ? `<div class="hint">Clientes ${fmt(total - totSocios)} · socios ${fmt(totSocios)}</div>` : ""}</div>
+    ${deSocio.length ? `<div class="label">Clientes</div>` : ""}
+    <div class="rows">${deCliente.map(filaDeuda).join("") || `<div class="row">${cobrar ? "Ningún cliente nos debe 🎉" : "No le debemos nada a nadie 🎉"}</div>`}</div>
+    ${deSocio.length ? `<div class="label">Socios · lo que le deben a QDC</div>
+      <div class="hint">De su stock: lo que vendieron (a precio Contado o lo que cobraron) y lo que se perdió (al costo).</div>
+      <div class="rows">${deSocio.map(filaDeuda).join("")}</div>` : ""}
     ${!cobrar ? S.cuentas.pagar.filter(p => p.sinFactura.length).map(p => `<div class="banner">📦 A ${esc(p.proveedor)}: recibido sin factura todavía ${fmt(p.sinFactura.reduce((a, s) => a + s.total, 0))} (${p.sinFactura.map(s => "semana del " + fecha(s.semana)).join(", ")}). No suma a la deuda hasta que llegue la factura.</div>`).join("") : ""}
     ${!cobrar ? avisosProveedor().map(t => `<div class="banner">⚠️ ${esc(t)}</div>`).join("") : ""}
     ${alDia.length ? `<details><summary class="hint">${cobrar ? "Clientes" : "Proveedores"} al día (${alDia.length})</summary><div class="rows" style="margin-top:8px">${cobrar ? `<div class="hint">De mayor a menor venta promedio por semana desde el corte (${fecha(corte)}).</div>` : ""}${alDia.map((x, i) => cobrar
