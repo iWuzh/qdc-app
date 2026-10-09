@@ -24,7 +24,7 @@ const leer = (k, def) => { try { const v = localStorage.getItem("qdc." + k); ret
 // no sirve: se borra para que no se mezcle. Se quedan la sesión, lo que falta
 // por enviar (cola) y los borradores del efectivo.
 if (leer("ambiente", "prueba") !== window.QDC_CONFIG.AMBIENTE) {
-  ["catalogo", "catalogoDia", "ruta", "cuentas", "stock", "compras", "recibido", "reportes", "reportesHora", "actualizado"].forEach(k => { try { localStorage.removeItem("qdc." + k); } catch (e) {} });
+  ["catalogo", "catalogoDia", "ruta", "cuentas", "stock", "compras", "recibido", "stockSem", "reportes", "reportesHora", "actualizado"].forEach(k => { try { localStorage.removeItem("qdc." + k); } catch (e) {} });
   guardar("ambiente", window.QDC_CONFIG.AMBIENTE);
 }
 
@@ -112,9 +112,9 @@ function aplicarLocal(reg) {
     }
     guardar("compras", S.compras);
   }
-  if (reg.tipo === "stock" && S.stock) moverLocal(reg.socio, reg.items, reg.movimiento === "entrada" ? 1 : -1);
-  if (reg.tipo === "stock" && S.stock && reg.movimiento === "traspaso") moverLocal(reg.destino, reg.items, 1);
-  if (reg.desdeStock && S.stock) moverLocal(reg.desdeStock, (reg.items || []).map(i => Object.assign({}, i, { cantidad: i.libras != null ? i.libras : i.cantidad })), -1);
+  if (reg.tipo === "stock" && S.stock) moverLocal(reg.socio, reg.items, reg.movimiento === "entrada" ? 1 : -1, reg.movimiento === "entrada" ? "entro" : reg.movimiento === "se_quedo" ? "vendio" : "otras");
+  if (reg.tipo === "stock" && S.stock && reg.movimiento === "traspaso") moverLocal(reg.destino, reg.items, 1, "entro");
+  if (reg.desdeStock && S.stock) moverLocal(reg.desdeStock, (reg.items || []).map(i => Object.assign({}, i, { cantidad: i.libras != null ? i.libras : i.cantidad })), -1, "vendio");
   if (reg.tipo === "conteo" && S.stock) {
     const s = socioStock(reg.socio);
     if (s) { s.items = reg.items.map(i => ({ producto: i.producto, variante: i.presentacion || "", sabor: i.sabor || "", u: "", cantidad: i.cantidad })); s.conteo = hoyIso(); s.movimientos = []; guardar("stock", S.stock); }

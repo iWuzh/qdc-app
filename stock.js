@@ -32,12 +32,19 @@ function precioUnit(it, tipo) {
 }
 
 // Ajuste local del saldo (sin esperar al servidor). signo: -1 sale, +1 entra.
-function moverLocal(socio, items, signo) {
+// col: la columna de la semana en curso donde cae (entro | vendio | otras), para
+// que la tabla de la semana no se quede atrás mientras llega el servidor.
+function moverLocal(socio, items, signo, col) {
   const s = socioStock(socio); if (!s) return;
+  const r2 = n => Math.round(n * 100) / 100;
   for (const it of items) {
     let x = s.items.find(y => mismoItem(y, it));
     if (!x) { x = { producto: it.producto, variante: it.presentacion || "", sabor: it.sabor || "", u: "", cantidad: 0 }; s.items.push(x); }
-    x.cantidad = Math.round((x.cantidad + signo * num(it.cantidad)) * 100) / 100;
+    x.cantidad = r2(x.cantidad + signo * num(it.cantidad));
+    if (!s.semana || !col) continue;
+    let w = s.semana.items.find(y => mismoItem(y, it));
+    if (!w) { w = { producto: x.producto, variante: x.variante, sabor: x.sabor, u: x.u, tenia: 0, entro: 0, vendio: 0, otras: 0, tiene: 0, ajuste: 0 }; s.semana.items.push(w); }
+    w[col] = r2(w[col] + num(it.cantidad)); w.tiene = r2(w.tiene + signo * num(it.cantidad));
   }
   guardar("stock", S.stock);
 }
@@ -51,30 +58,55 @@ function stock() {
   const activo = S.stock && S.stock.activo;
   // Sin conteo todavía (o sin datos) solo se ve lo recibido, que no depende del stock.
   if (!activo || v.socio === RECIBIDO) { v.socio = RECIBIDO; return stockRecibido(); }
-  header("Stock", "Desde el conteo del " + fecha(S.stock.inicio), false);
   v.socio = v.socio || miSocio() || stockSocios()[0].socio;
   const s = socioStock(v.socio), its = itemsDe(v.socio), esMio = norm(v.socio) === norm(miSocio());
-  const res = s.resumen || [];
+  // Semana por semana (domingo → sábado), igual que 📦 Recibido. La semana en
+  // curso viene con el stock; las anteriores se piden al servidor y se guardan.
+  const hoySem = s.semana ? s.semana.semana : "";
+  const actual = !v.semana || v.semana === hoySem;
+  S.stockSem = S.stockSem || leer("stockSem", {});
+  const clave = norm(v.socio) + "|" + v.semana;
+  const sem = actual ? s.semana : S.stockSem[clave];
+  if (!actual && !v.pedido) {
+    v.pedido = true;
+    llamar({ accion: "stock_semana", socio: v.socio, semana: v.semana }).then(x => {
+      if (!x.ok) return;
+      S.stockSem[clave] = x.semana; guardar("stockSem", S.stockSem);
+      if (S.tab === "stock" && S.vista === v) stock();
+    }).catch(() => {});
+  }
+  header("Stock", sem ? sem.etiqueta : "Desde el conteo del " + fecha(S.stock.inicio), false);
   const debe = deudaSocio(v.socio);
+  const ajustes = sem ? sem.items.filter(r => Math.abs(r.ajuste) >= 0.005) : [];
+  const movs = sem ? sem.movimientos : s.movimientos || [];
+  const MOVTXT = { "Se quedo": "Vendió", "Venta": "Vendió a un cliente", "Perdida": "Se perdió", "Promocion": "Promo", "Traspaso": "Pasó a otro socio", "Entrada": "Entró", "Conteo": "Contó" };
   $("#screen").innerHTML = `
     ${avisoSinResponsable()}
     ${chipsStock(v)}
-    ${debe > 0.005 ? `<button class="banner" id="verDeuda" style="text-align:left;border:0;width:100%;cursor:pointer">💰 ${esMio ? "Le debes" : esc(v.socio) + " le debe"} a QDC <b>${fmt(debe)}</b> (de su stock). Ver ›</button>` : ""}
-    <div class="card">
-      <div class="k" style="font-weight:700">${esMio ? "Lo que tienes" : "Lo que tiene " + esc(v.socio)}${s.conteo ? ` <span class="hint">· contado el ${fecha(s.conteo)}</span>` : ""}</div>
-      ${res.length ? tablaSocio(res) : its.map(it => `<div class="line"><span>${esc(descItem(it))}</span><b>${cantTxt2(it.cantidad, it.u)}</b></div>`).join("") || `<div class="hint">Nada en stock.</div>`}
-    </div>
-    ${its.length ? `<div class="label">¿Qué pasó?</div>
+    ${s.semana ? `<div class="seg"><button id="skAnt" ${sem && sem.semana <= S.stock.inicio ? "disabled" : ""}>‹ Semana anterior</button><button id="skSig" ${actual ? "disabled" : ""}>Siguiente ›</button></div>` : ""}
+    ${actual && debe > 0.005 ? `<button class="banner" id="verDeuda" style="text-align:left;border:0;width:100%;cursor:pointer">💰 ${esMio ? "Le debes" : esc(v.socio) + " le debe"} a QDC <b>${fmt(debe)}</b> (de su stock). Ver ›</button>` : ""}
+    ${!sem && !actual ? `<div class="hint">${S.enLinea ? "Cargando esa semana…" : "Hace falta señal para ver esa semana."}</div>` : `<div class="card">
+      <div class="k" style="font-weight:700">${actual ? (esMio ? "Lo que tienes" : "Lo que tiene " + esc(v.socio)) : (esMio ? "Tu stock esa semana" : "El stock de " + esc(v.socio) + " esa semana")}${actual && s.conteo ? ` <span class="hint">· contado el ${fecha(s.conteo)}</span>` : ""}</div>
+      ${sem ? (sem.items.length ? tablaSocio(sem.items, actual) : `<div class="hint">${actual ? "Nada en stock." : "No tenía nada ni hubo movimientos esa semana."}</div>`)
+        : its.map(it => `<div class="line"><span>${esc(descItem(it))}</span><b>${cantTxt2(it.cantidad, it.u)}</b></div>`).join("") || `<div class="hint">Nada en stock.</div>`}
+      ${ajustes.length ? `<div class="hint">Un conteo dejó ${ajustes.map(r => `${esc(descItem(r))} en ${cantTxt2(r.tiene, r.u)} (${r.ajuste > 0 ? "+" : "−"}${cantTxt2(Math.abs(r.ajuste), r.u)})`).join(", ")} sin entrada ni salida: fue el punto de partida.</div>` : ""}
+    </div>`}
+    ${actual ? `${its.length ? `<div class="label">¿Qué pasó?</div>
     <div class="big">${Object.keys(MOV).map(k => `<button class="act" data-mov="${k}" style="min-height:0;gap:4px"><div class="t" style="font-size:17px">${MOV[k].t}</div><div class="d">${MOV[k].d}</div></button>`).join("")}</div>` : ""}
     <button class="go ${its.length ? "alt" : ""}" id="contar">Contar ${esMio ? "mi" : "el"} stock${esMio ? "" : " de " + esc(v.socio)}</button>
-    <div class="hint">Para entregarle a un cliente de la lista desde este stock: en <b>Entregas</b> o <b>Entregar pedido</b>, elige "Del stock de ${esc(v.socio)}". El cliente queda debiendo.</div>
-    ${s.movimientos && s.movimientos.length ? `<div class="label">Desde el último conteo</div>
-      <div class="rows">${s.movimientos.map(m => `<div class="row"><div><div style="font-weight:700">${esc(m.tipo === "Se quedo" ? "Vendió" : m.tipo === "Perdida" ? "Se perdió" : m.tipo === "Promocion" ? "Promo" : m.tipo === "Traspaso" ? "Pasó a otro socio" : m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>` : ""}`;
+    <div class="hint">Para entregarle a un cliente de la lista desde este stock: en <b>Entregas</b> o <b>Entregar pedido</b>, elige "Del stock de ${esc(v.socio)}". El cliente queda debiendo.</div>`
+      : `<div class="hint">Semana cerrada: solo se ve. Para anotar algo, vuelve a la semana en curso.</div>`}
+    ${movs.length ? `<div class="label">${sem ? "Entradas y salidas de la semana" : "Desde el último conteo"}</div>
+      <div class="rows">${movs.map(m => `<div class="row"><div><div style="font-weight:700">${esc(MOVTXT[m.tipo] || m.tipo)}</div><div class="s">${fecha(m.fecha)} · ${esc(pdfNombre(m.d))}${m.nota ? " · " + esc(m.nota) : ""}</div></div><div class="r">${m.tipo === "Entrada" ? "+" : m.tipo === "Conteo" ? "=" : "−"}${cantTxt2(m.q)}</div></div>`).join("")}</div>`
+      : sem ? `<div class="hint">Sin entradas ni salidas esta semana.</div>` : ""}`;
   cablearChipsStock();
   cablearSinResponsable();
   const vd = $("#verDeuda"); if (vd) vd.onclick = () => ir("cuentas", { lado: "cobrar", quien: deudaCliente(v.socio).cliente });
   $$("[data-mov]").forEach(b => b.onclick = () => ir("stock", { socio: v.socio, mov: b.dataset.mov, lineas: [] }));
-  $("#contar").onclick = () => ir("stock", { socio: v.socio, conteo: true });
+  const ct = $("#contar"); if (ct) ct.onclick = () => ir("stock", { socio: v.socio, conteo: true });
+  const base = sem ? sem.semana : v.semana;
+  const ant = $("#skAnt"); if (ant) ant.onclick = () => base && ir("stock", { socio: v.socio, semana: isoMas(base, -7) });
+  const sig = $("#skSig"); if (sig) sig.onclick = () => base && ir("stock", { socio: v.socio, semana: isoMas(base, 7) === hoySem ? "" : isoMas(base, 7) });
 }
 
 // ---------- Salida (vendió / se perdió / desecho / promo) ----------
@@ -323,11 +355,11 @@ function cablearChipsStock() { $$("[data-soc]").forEach(b => b.onclick = () => i
 
 // Mismo formato que lo recibido: de dónde salió lo que tiene y a dónde fue.
 const nq = (q, u) => q ? cantTxt2(q, u) : "·";
-function tablaSocio(res) {
+function tablaSocio(res, actual) {
   return `<div class="rc-head rc-5"><span></span><span>Tenía</span><span>Entró</span><span>Vendió</span><span>Otras</span><span>Tiene</span></div>
     ${res.map(r => `<div class="rc-row rc-5"><span class="rc-n">${esc(descItem(r))}</span><span>${nq(r.tenia, r.u)}</span><span>${nq(r.entro, r.u)}</span>
       <span>${nq(r.vendio, r.u)}</span><span>${nq(r.otras, r.u)}</span><b>${nq(r.tiene, r.u)}</b></div>`).join("")}
-    <div class="hint">Tenía = el último conteo. Vendió = a clientes desde su stock o "Vendió". Otras = se perdió, desecho, promo y lo que pasó a otro socio.</div>`;
+    <div class="hint">Tenía = al empezar la semana (domingo). Tiene = ${actual ? "ahora" : "al cerrarla (sábado)"}. Vendió = a clientes desde su stock o "Vendió". Otras = se perdió, desecho, promo y lo que pasó a otro socio.</div>`;
 }
 
 // ---------- 📦 Recibido: lo que llegó en la semana y a dónde fue ----------
