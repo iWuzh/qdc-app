@@ -31,7 +31,13 @@ function contarEfectivo() {
     esMonto ? "Para " + (PARA_TXT[para.rapido] || "el monto") + (para.quien ? " · " + para.quien : "") : "La caja contra el sistema", true);
   const c = leer(clave, {});              // { "2000": "12", ... } (texto, como se escribió)
   const cant = d => Math.max(0, Math.floor(num(c[d.v])));
-  const total = DENOMINACIONES.reduce((a, d) => a + cant(d) * d.v, 0);
+  const enMano = DENOMINACIONES.reduce((a, d) => a + cant(d) * d.v, 0);
+  // Cuenta de banco (solo en "caja"): el sistema lleva una sola caja y no sabe
+  // qué entró en efectivo y qué por transferencia, así que se cuadra la suma.
+  // El saldo no se borra con "Empezar de nuevo": cambia poco entre conteos.
+  const bancoTxt = esMonto ? "" : leer("efectivoBanco", "");
+  const banco = Math.max(0, Math.round(num(bancoTxt) * 100) / 100);
+  const total = Math.round((enMano + banco) * 100) / 100;
   const sistema = !esMonto && S.cuentas && S.cuentas.caja ? S.cuentas.caja.efectivo : null;
   const dif = sistema == null ? null : Math.round((total - sistema) * 100) / 100;
   const cuadra = dif != null && Math.abs(dif) < 0.5;
@@ -60,14 +66,18 @@ function contarEfectivo() {
     <div class="ef-tot">
       <div class="k">${esMonto ? "Total" : "Total contado"}</div>
       <div class="v">${fmt(total)}</div>
+      ${banco ? `<div class="k">Efectivo ${fmt(enMano)} · Banco ${fmt(banco)}</div>` : ""}
       ${comparacion}
     </div>
     <div class="label">Billetes${billetes ? " · " + billetes : ""}</div>
     <div class="ef-lista">${DENOMINACIONES.filter(d => d.tipo === "billete").map(fila).join("")}</div>
     <div class="label">Monedas</div>
     <div class="ef-lista">${DENOMINACIONES.filter(d => d.tipo === "moneda").map(fila).join("")}</div>
+    ${esMonto ? "" : `<div class="label">Cuenta de banco</div>
+    <div class="field"><label for="efBanco">Saldo en la cuenta</label><input class="txt" id="efBanco" inputmode="decimal" placeholder="0" value="${esc(bancoTxt)}"></div>
+    <div class="hint">Se suma al efectivo para comparar con el sistema, que no separa efectivo de transferencias.</div>`}
     ${aplicar}
-    <div class="btns"><button class="go alt" id="efLimpiar" ${total ? "" : "disabled"}>Empezar de nuevo</button>
+    <div class="btns"><button class="go alt" id="efLimpiar" ${enMano ? "" : "disabled"}>Empezar de nuevo</button>
       ${esMonto ? `<button class="go" id="efUsar" ${total ? "" : "disabled"}>Usar ${fmt(total)}</button>` : `<button class="go" id="efCompartir" ${total ? "" : "disabled"}>Compartir</button>`}</div>`;
   $$("[data-ef]").forEach(inp => {
     inp.oninput = () => { c[inp.dataset.ef] = inp.value.replace(/[^0-9]/g, ""); guardar(clave, c); conFoco(contarEfectivo); };
@@ -79,6 +89,7 @@ function contarEfectivo() {
       if (sig) document.getElementById("ef" + sig.v).focus(); else inp.blur();
     };
   });
+  const ba = $("#efBanco"); if (ba) ba.oninput = () => { guardar("efectivoBanco", ba.value.replace(/[^0-9.]/g, "")); conFoco(contarEfectivo); };
   $("#efLimpiar").onclick = () => { guardar(clave, {}); v.aplicando = false; contarEfectivo(); window.scrollTo(0, 0); };
   const ap = $("#efAplicar"); if (ap) ap.onclick = () => { v.aplicando = true; contarEfectivo(); setTimeout(() => $("#efMotivo") && $("#efMotivo").focus(), 0); };
   const no = $("#efNo"); if (no) no.onclick = () => { v.aplicando = false; contarEfectivo(); };
@@ -94,8 +105,9 @@ function contarEfectivo() {
   };
   const co = $("#efCompartir"); if (co) co.onclick = () => {
     const hoy = new Date();
-    const txt = [`💵 Efectivo contado ${hoy.getDate()} ${MESES[hoy.getMonth()]}: *${fmt(total)}*`]
+    const txt = [`💵 ${banco ? "Caja contada" : "Efectivo contado"} ${hoy.getDate()} ${MESES[hoy.getMonth()]}: *${fmt(total)}*`]
       .concat(DENOMINACIONES.filter(cant).map(d => `${cant(d)} × ${d.v.toLocaleString("en-US")} = ${fmt(cant(d) * d.v)}`))
+      .concat(banco ? [`Efectivo: ${fmt(enMano)}`, `🏦 Banco: ${fmt(banco)}`] : [])
       .concat(dif == null ? [] : [cuadra ? "✓ Cuadra con el sistema" : dif < 0 ? `Faltan ${fmt(-dif)} (sistema: ${fmt(sistema)})` : `Sobran ${fmt(dif)} (sistema: ${fmt(sistema)})`])
       .join("\n");
     if (navigator.share) navigator.share({ text: txt }).catch(() => {});
