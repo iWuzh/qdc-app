@@ -176,6 +176,7 @@ function pintarSync() {
   if (!S.sesion) { b.hidden = true; return; }
   b.hidden = false;
   b.className = "sync";
+  if (S.nuevaVersion && !S.enviando) { b.classList.add("pend"); b.textContent = "⬆ Actualizar app"; return; }
   if (S.cola.length) { b.classList.add("pend"); b.textContent = (S.enviando ? "↻ " : "⏳ ") + S.cola.length + " sin enviar"; }
   else if (!S.enLinea) { b.classList.add("off"); b.textContent = "📴 Sin señal"; }
   else b.textContent = S.enviando ? "↻ Actualizando" : "✓ Al día";
@@ -184,7 +185,12 @@ function pintarSync() {
 // ---------- Utilidades de pantalla ----------
 function toast(m) { const t = $("#toast"); t.textContent = m; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2800); }
 function header(t, s, back) { $("#title").textContent = t; $("#subtitle").textContent = s || ""; $("#back").hidden = !back; }
-function ir(tab, vista) { S.tab = tab; S.vista = vista || {}; pintar(); window.scrollTo(0, 0); }
+function ir(tab, vista) {
+  // Hay versión nueva esperando (ver el final del archivo): al volver al Inicio
+  // sin nada a medias se recarga sola. Lo pendiente de enviar vive en la cola.
+  if (S.nuevaVersion && tab === "inicio" && !vista && !S.enviando) return location.reload();
+  S.tab = tab; S.vista = vista || {}; pintar(); window.scrollTo(0, 0);
+}
 function conFoco(fn) {
   const a = document.activeElement, id = a && a.id, pos = a && a.selectionStart;
   fn();
@@ -1050,12 +1056,29 @@ $("#back").onclick = () => {
   if (S.tab === "inicio" && v.contar === "monto" && v.para) return ir("inicio", Object.assign({}, v.para));
   ir("inicio");
 };
-$("#sync").onclick = () => { if (!S.enviando) { toast("Actualizando…"); S.forzarCatalogo = true; sincronizar(); } };
+$("#sync").onclick = () => { if (S.nuevaVersion && !S.enviando) return location.reload(); if (!S.enviando) { toast("Actualizando…"); S.forzarCatalogo = true; sincronizar(); } };
 window.addEventListener("online", () => { S.enLinea = true; sincronizar(); });
 window.addEventListener("offline", () => { S.enLinea = false; pintarSync(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) sincronizar(); });
 setInterval(() => { if (S.cola.length) sincronizar(); }, 30000);
 
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+// Versión nueva. La app instalada se queda abierta en el teléfono por días y
+// nada la recargaba: se subía un cambio y los socios seguían viendo lo viejo
+// (9-oct-2026). Ahora, cada vez que la app vuelve al frente se pregunta si hay
+// versión nueva; cuando llega, se recarga sola si está en el Inicio sin nada a
+// medias, y si no, el botón de arriba dice "⬆ Actualizar app".
+if ("serviceWorker" in navigator) {
+  const sw = navigator.serviceWorker, yaHabia = !!sw.controller;
+  sw.register("sw.js").then(reg => {
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+  }).catch(() => {});
+  sw.addEventListener("controllerchange", () => {
+    if (!yaHabia || S.nuevaVersion) return;   // primera instalación: no hay nada viejo en pantalla
+    S.nuevaVersion = true;
+    const a = document.activeElement, escribiendo = a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA");
+    if (S.tab === "inicio" && !Object.keys(S.vista || {}).length && !escribiendo && !S.enviando) location.reload();
+    else pintarSync();
+  });
+}
 pintar(); pintarSync();
 if (S.sesion) sincronizar();
