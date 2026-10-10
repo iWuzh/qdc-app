@@ -502,7 +502,12 @@ function pedido() {
   if (!S.catalogo) { header("Nuevo pedido", "", true); $("#screen").innerHTML = `<div class="hint">${S.enviando ? "Cargando lista de productos…" : "Hace falta señal una vez para bajar la lista de productos."}</div>`; return; }
   const v = S.vista; v.lineas = v.lineas || [];
   header("Nuevo pedido", "Guárdalo para la ruta, o entrégalo ya", true);
-  const clientes = S.catalogo.clientes;
+  // Los socios también piden a su nombre (Yederly, Marcos) aunque no estén en la
+  // pestaña Clientes: su pedido va a Pedidos como cualquiera y al entregarse
+  // entra a su stock, sin cobro (el servidor lo enruta, SOCIOS_STOCK).
+  const sociosCat = S.catalogo.socios || [];
+  const clientes = S.catalogo.clientes.concat(sociosCat.filter(n => !S.catalogo.clientes.some(c => norm(c) === norm(n))));
+  const esSocio = !v.otro && !!v.cliente && sociosCat.some(n => norm(n) === norm(v.cliente));
   const dist = !v.otro && !!v.cliente;
   const { total, faltaPeso, hay } = totalLineas(v.lineas, dist, v.otro ? null : v.cliente);
   const quien = v.otro ? ((v.ref || "").trim() || "Contado") : v.cliente;
@@ -514,7 +519,7 @@ function pedido() {
       <button class="chip otro" id="otro" aria-pressed="${!!v.otro}">+ Otro</button>
     </div>
     ${v.otro ? `<div class="field"><label for="ref">Nombre o referencia (opcional)</label><input class="txt" id="ref" placeholder="Ej: señora del colmado" value="${esc(v.ref)}"></div>` : ""}
-    ${quien ? `<div>${dist ? `<span class="tag dist">Distribución</span> <span class="hint">está en la lista de clientes</span>` : `<span class="tag cont">Contado</span> <span class="hint">no está en la lista de clientes</span>`}</div>` : ""}
+    ${quien ? `<div>${esSocio ? `<span class="tag dist">Socio</span> <span class="hint">al entregarse entra a su stock; no se cobra hasta que lo venda</span>` : dist ? `<span class="tag dist">Distribución</span> <span class="hint">está en la lista de clientes</span>` : `<span class="tag cont">Contado</span> <span class="hint">no está en la lista de clientes</span>`}</div>` : ""}
     <div class="label">Productos</div>
     ${sel.html}
     ${faltaPeso ? `<div class="hint">⚖️ Los quesos por libra sin peso no entran en el total. Para <b>Entregar pedido</b> hace falta el peso.</div>` : ""}
